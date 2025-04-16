@@ -32,7 +32,7 @@ pip install droidrun
 ### 🔧 Option 2: Install from Source
 
 ```bash
-git clone https://github.com/yourusername/droidrun.git
+git clone https://github.com/droidrun/droidrun.git
 cd droidrun
 pip install -e .
 ```
