@@ -218,9 +218,9 @@ async def setup(path: str, device: str | None):
             return
         else:
             console.print(f"[bold green]Installation successful![/]")
-            console.print(f"\n[yellow]Next step:[/]")
-            console.print(f"  Run [bold]droidrun start --device {device}[/] to enable the accessibility service.")
-            console.print(f"  Or manually enable '[bold]com.droidrun.portal[/]' in your device's Accessibility settings.")
+            # Directly call the start function to enable the service
+            console.print("\n[bold blue]Proceeding to enable the accessibility service...[/]")
+            await start(device=device)
 
     except Exception as e:
         console.print(f"[bold red]Error during setup:[/] {e}")
