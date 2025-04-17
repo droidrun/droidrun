@@ -1,4 +1,3 @@
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./static/droidrun-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="./static/droidrun.png">
@@ -100,6 +99,12 @@ Create a `.env` file in your working directory or set environment variables:
 export OPENAI_API_KEY="your_openai_api_key_here"
 export ANTHROPIC_API_KEY="your_anthropic_api_key_here"
 export GEMINI_API_KEY="your_gemini_api_key_here"
+
+# For Azure OpenAI support
+export AZURE_OPENAI_KEY="your_azure_openai_key_here"
+export AZURE_OPENAI_ENDPOINT="https://your-resource-name.openai.azure.com"
+export AZURE_OPENAI_DEPLOYMENT="your_model_deployment_name"
+export AZURE_OPENAI_API_VERSION="2023-05-15"  # Optional, defaults to this version if not set
 ```
 
 To load the environment variables from the `.env` file:
@@ -152,6 +157,62 @@ droidrun "Check the battery level" --provider anthropic --model claude-3-sonnet-
 # Using Gemini
 droidrun "Install and open Instagram" --provider gemini --model gemini-2.0-flash
 ```
+
+## 🔷 Using Azure OpenAI
+
+You can use Azure OpenAI API instead of the standard OpenAI API. This requires a few additional environment variables:
+
+### Command Line Usage
+
+```bash
+# Using Azure OpenAI
+droidrun "Open the settings app" --provider azure
+```
+
+### Python API Usage
+
+```python
+#!/usr/bin/env python3
+import asyncio
+import os
+from droidrun.agent.react_agent import ReActAgent
+from droidrun.agent.llm_reasoning import LLMReasoner
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+async def main():
+    # Create an Azure OpenAI LLM instance
+    llm = LLMReasoner(
+        llm_provider="azure",
+        model_name="gpt-4",  # The base model name
+        api_key=os.environ.get("AZURE_OPENAI_KEY"),
+        azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+        azure_deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT"),
+        azure_api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2023-05-15"),
+        temperature=0.2
+    )
+    
+    # Create and run the agent
+    agent = ReActAgent(
+        task="Open the Settings app and check the Android version",
+        llm=llm
+    )
+    
+    steps = await agent.run()
+    print(f"Execution completed with {len(steps)} steps")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Make sure you have the required Azure OpenAI environment variables set:
+
+- `AZURE_OPENAI_KEY`: Your Azure OpenAI API key
+- `AZURE_OPENAI_ENDPOINT`: Your Azure OpenAI endpoint URL (e.g., `https://your-resource.openai.azure.com`)
+- `AZURE_OPENAI_DEPLOYMENT`: Your deployment name for the model
+- `AZURE_OPENAI_API_VERSION`: API version (optional, defaults to "2023-05-15")
 
 ### ⚙️ Additional Options
 
@@ -272,4 +333,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the LICENSE file for details.

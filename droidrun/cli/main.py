@@ -41,6 +41,10 @@ async def run_command(command: str, device: str | None, provider: str, model: st
     
     # Get API keys from environment variables
     api_key = None
+    azure_endpoint = None
+    azure_deployment = None
+    azure_api_version = None
+    
     if provider.lower() == 'openai':
         api_key = os.environ.get('OPENAI_API_KEY')
         if not api_key:
@@ -48,6 +52,24 @@ async def run_command(command: str, device: str | None, provider: str, model: st
             return
         if not model:
             model = "gpt-4o-mini"
+    elif provider.lower() == 'azure':
+        api_key = os.environ.get('AZURE_OPENAI_KEY')
+        azure_endpoint = os.environ.get('AZURE_OPENAI_ENDPOINT')
+        azure_deployment = os.environ.get('AZURE_OPENAI_DEPLOYMENT')
+        azure_api_version = os.environ.get('AZURE_OPENAI_API_VERSION')
+        
+        if not api_key:
+            console.print("[bold red]Error:[/] AZURE_OPENAI_KEY environment variable not set")
+            return
+        if not azure_endpoint:
+            console.print("[bold red]Error:[/] AZURE_OPENAI_ENDPOINT environment variable not set")
+            return
+        if not azure_deployment:
+            console.print("[bold red]Error:[/] AZURE_OPENAI_DEPLOYMENT environment variable not set")
+            return
+        
+        if not model:
+            model = "gpt-4"  # Default model for Azure
     elif provider.lower() == 'anthropic':
         api_key = os.environ.get('ANTHROPIC_API_KEY')
         if not api_key:
@@ -86,13 +108,22 @@ async def run_command(command: str, device: str | None, provider: str, model: st
         console.print("[yellow]Press Ctrl+C to stop execution[/]")
         
         try:
+            # Create kwargs for Azure-specific parameters if needed
+            kwargs = {}
+            if provider.lower() == 'azure':
+                kwargs["azure_endpoint"] = azure_endpoint
+                kwargs["azure_deployment"] = azure_deployment
+                if azure_api_version:
+                    kwargs["azure_api_version"] = azure_api_version
+            
             steps = await run_agent(
                 task=command,
                 device_serial=device,  # Still pass for backward compatibility
                 llm_provider=provider,
                 model_name=model,
                 api_key=api_key,
-                vision=vision
+                vision=vision,
+                **kwargs  # Pass Azure-specific parameters
             )
             
             # Final message
@@ -129,7 +160,7 @@ def cli():
 @cli.command()
 @click.argument('command', type=str)
 @click.option('--device', '-d', help='Device serial number or IP address', default=None)
-@click.option('--provider', '-p', help='LLM provider (openai, anthropic, or gemini)', default='openai')
+@click.option('--provider', '-p', help='LLM provider (openai, azure, anthropic, or gemini)', default='openai')
 @click.option('--model', '-m', help='LLM model name', default=None)
 @click.option('--steps', type=int, help='Maximum number of steps', default=15)
 @click.option('--vision', is_flag=True, help='Enable vision capabilities')
@@ -262,4 +293,4 @@ async def setup(path: str, device: str | None):
         traceback.print_exc()
 
 if __name__ == '__main__':
-    cli() 
+    cli()

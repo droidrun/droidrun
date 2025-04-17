@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 # Import OpenAI for LLM integration
 try:
-    from openai import OpenAI
+    from openai import OpenAI, AzureOpenAI
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -55,18 +55,24 @@ class LLMReasoner:
         api_key: Optional[str] = None,
         temperature: float = 0.2,
         max_tokens: int = 2000,
-        vision: bool = False
+        vision: bool = False,
+        azure_endpoint: Optional[str] = None,
+        azure_deployment: Optional[str] = None,
+        azure_api_version: Optional[str] = None
     ):
         """Initialize the LLM reasoner.
         
         Args:
-            llm_provider: LLM provider ('openai', 'anthropic', or 'gemini'). 
+            llm_provider: LLM provider ('openai', 'azure', 'anthropic', or 'gemini'). 
                          If model_name starts with 'gemini-', provider will be set to 'gemini' automatically.
             model_name: Model name to use
             api_key: API key for the LLM provider
             temperature: Temperature for generation
             max_tokens: Maximum tokens to generate
             vision: Whether vision capabilities (screenshot) are enabled
+            azure_endpoint: Azure OpenAI endpoint URL (required for Azure)
+            azure_deployment: Azure OpenAI deployment name (required for Azure)
+            azure_api_version: Azure OpenAI API version (defaults to '2023-05-15')
         """
         # Auto-detect Gemini models
         if model_name and model_name.startswith("gemini-"):
@@ -102,6 +108,38 @@ class LLMReasoner:
                 base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
             )
             logger.info(f"Initialized Gemini client with model {self.model_name}")
+            
+        elif self.llm_provider == "azure":
+            if not OPENAI_AVAILABLE:
+                raise ImportError("OpenAI package not installed. Install with 'pip install openai'")
+                
+            # Set default model if not specified
+            self.model_name = model_name or "gpt-4"
+            
+            # Get Azure-specific configuration
+            self.api_key = api_key or os.environ.get("AZURE_OPENAI_KEY")
+            self.azure_endpoint = azure_endpoint or os.environ.get("AZURE_OPENAI_ENDPOINT")
+            self.azure_deployment = azure_deployment or os.environ.get("AZURE_OPENAI_DEPLOYMENT")
+            self.azure_api_version = azure_api_version or os.environ.get("AZURE_OPENAI_API_VERSION") or "2023-05-15"
+            
+            if not self.api_key:
+                raise ValueError("Azure OpenAI API key not provided and not found in environment (AZURE_OPENAI_KEY)")
+            if not self.azure_endpoint:
+                raise ValueError("Azure OpenAI endpoint not provided and not found in environment (AZURE_OPENAI_ENDPOINT)")
+            if not self.azure_deployment:
+                raise ValueError("Azure OpenAI deployment name not provided and not found in environment (AZURE_OPENAI_DEPLOYMENT)")
+            
+            # Initialize Azure OpenAI client
+            self.client = AzureOpenAI(
+                api_key=self.api_key,
+                api_version=self.azure_api_version,
+                azure_endpoint=self.azure_endpoint
+            )
+            
+            # Store deployment name to use instead of model name
+            self.deployment_name = self.azure_deployment
+            
+            logger.info(f"Initialized Azure OpenAI client with deployment {self.deployment_name}")
             
         elif self.llm_provider == "openai":
             if not OPENAI_AVAILABLE:
@@ -380,7 +418,7 @@ class LLMReasoner:
         return prompt
     
     async def _call_openai(self, system_prompt: str, user_prompt: str, screenshot_data: Optional[bytes] = None) -> str:
-        """Call OpenAI or Gemini API to generate a response.
+        """Call OpenAI, Azure OpenAI, or Gemini API to generate a response.
         
         Args:
             system_prompt: System prompt string
@@ -432,14 +470,26 @@ class LLMReasoner:
             # Add the main user prompt
             messages.append({"role": "user", "content": user_prompt})
 
-            response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model=self.model_name,
-                messages=messages,
-                temperature=self.temperature,
-                max_tokens=self.max_tokens,
-                response_format={"type": "json_object"}
-            )
+            # Different API call based on provider
+            if self.llm_provider == "azure":
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
+                    model=self.deployment_name,  # Use deployment name for Azure
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    response_format={"type": "json_object"}
+                )
+            else:
+                # Standard OpenAI or Gemini
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
+                    model=self.model_name,
+                    messages=messages,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                    response_format={"type": "json_object"}
+                )
             
             # Extract token usage statistics
             usage = response.usage
@@ -462,7 +512,8 @@ class LLMReasoner:
             
             return response.choices[0].message.content
         except Exception as e:
-            logger.error(f"Error calling {'Gemini' if self.llm_provider == 'gemini' else 'OpenAI'} API: {e}")
+            provider_name = "Gemini" if self.llm_provider == "gemini" else "Azure OpenAI" if self.llm_provider == "azure" else "OpenAI"
+            logger.error(f"Error calling {provider_name} API: {e}")
             raise
     
     async def _call_anthropic(self, system_prompt: str, user_prompt: str, screenshot_data: Optional[bytes] = None) -> str:
@@ -564,4 +615,4 @@ class LLMReasoner:
                 "thought": thought,
                 "action": action,
                 "parameters": params
-            } 
+            }
