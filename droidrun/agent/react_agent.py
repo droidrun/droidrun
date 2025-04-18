@@ -516,7 +516,8 @@ async def run_agent(
     llm_provider: Optional[str] = None,
     model_name: Optional[str] = None,
     api_key: Optional[str] = None,
-    vision: bool = False
+    vision: bool = False,
+    **kwargs
 ) -> List[ReActStep]:
     """Run the ReAct agent with the given goal.
     
@@ -524,10 +525,11 @@ async def run_agent(
         task: The automation task to perform
         llm: LLM instance to use for reasoning
         device_serial: Serial number of the Android device
-        llm_provider: LLM provider name (openai, anthropic, or gemini)
+        llm_provider: LLM provider name (openai, azure, anthropic, or gemini)
         model_name: Name of the LLM model to use
         api_key: API key for accessing the LLM service
         vision: Whether to enable vision capabilities (screenshot tool)
+        **kwargs: Additional provider-specific parameters
     
     Returns:
         List of ReAct steps taken
@@ -542,7 +544,8 @@ async def run_agent(
             api_key=api_key,
             temperature=0.2,
             max_tokens=2000,
-            vision=vision
+            vision=vision,
+            **kwargs  # Pass additional provider-specific parameters
         )
     
     agent = ReActAgent(
@@ -553,4 +556,4 @@ async def run_agent(
     )
     
     steps = await agent.run()
-    return steps 
+    return steps
