@@ -176,21 +176,17 @@ droidrun "Open the settings app" --provider azure
 import asyncio
 import os
 from droidrun.agent.react_agent import ReActAgent
-from droidrun.agent.llm_reasoning import LLMReasoner
+from droidrun import AzureOpenAILLM  # Import the AzureOpenAILLM class directly
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
 async def main():
-    # Create an Azure OpenAI LLM instance
-    llm = LLMReasoner(
-        llm_provider="azure",
-        model_name="gpt-4",  # The base model name
-        api_key=os.environ.get("AZURE_OPENAI_KEY"),
-        azure_endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
-        azure_deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT"),
-        azure_api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2023-05-15"),
+    # Create an Azure Open AI LLM instance using the dedicated class
+    llm = AzureOpenAILLM(
+        model="gpt-4",  # The base model name
+        # Environment variables are automatically loaded if not provided
         temperature=0.2
     )
     
@@ -233,7 +229,7 @@ If you want to use DroidRun in your Python code rather than via the CLI, you can
 import asyncio
 import os
 from droidrun.agent.react_agent import ReActAgent
-from droidrun.agent.llm_reasoning import LLMReasoner
+from droidrun import OpenAILLM, AnthropicLLM, GeminiLLM  # Import provider-specific classes
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -241,12 +237,23 @@ load_dotenv()
 
 async def main():
     # Create an LLM instance (choose your preferred provider)
-    llm = LLMReasoner(
-        llm_provider="gemini",  # Can be "openai", "anthropic", or "gemini"
-        model_name="gemini-2.0-flash",  # Choose appropriate model for your provider
-        api_key=os.environ.get("GEMINI_API_KEY"),  # Get API key from environment
+    # Example with Gemini
+    llm = GeminiLLM(
+        model="gemini-2.0-flash",  # Choose appropriate model for your provider
         temperature=0.2
     )
+    
+    # Or use OpenAI
+    # llm = OpenAILLM(
+    #     model="gpt-4o-mini",
+    #     temperature=0.2
+    # )
+    
+    # Or use Anthropic
+    # llm = AnthropicLLM(
+    #     model="claude-3-sonnet-20240229",
+    #     temperature=0.2
+    # )
     
     # Create and run the agent
     agent = ReActAgent(
