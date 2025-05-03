@@ -7,8 +7,8 @@ import click
 import os
 from rich.console import Console
 from droidrun.tools import DeviceManager
-from droidrun.agent import ReActAgent
-from droidrun.agent.llm_reasoning import LLMReasoner
+from droidrun.agent.react.react_agent import ReActAgent
+from droidrun.agent.droid_agent import DroidAgent 
 from functools import wraps
 
 # Import the install_app function directly for the setup command
@@ -89,31 +89,30 @@ async def run_command(command: str, device: str | None, provider: str, model: st
         
         # Create LLM reasoner
         console.print("[bold blue]Initializing LLM reasoner...[/]")
-        llm = LLMReasoner(
+        agent = DroidAgent(
             llm_provider=provider,
             model_name=model,
             api_key=api_key,
+            device_serial=device,
             temperature=0.2,
-            max_tokens=2000,
             vision=vision,
-            base_url=base_url
+            base_url=base_url,
+            max_steps=steps
         )
         
-        # Create and run the agent
+        # Run the agent
         console.print("[bold blue]Running ReAct agent...[/]")
         console.print("[yellow]Press Ctrl+C to stop execution[/]")
         
         try:
-            agent = ReActAgent(
-                task=command,
-                llm=llm,
-                device_serial=device,
-                max_steps=steps
-            )
-            steps = await agent.run()
+            success = await agent.run(command)
             
             # Final message
-            console.print(f"[bold green]Execution completed with {len(steps)} steps[/]")
+            if success:
+                console.print("[bold green]Execution completed successfully![/]")
+            else:
+                console.print("[bold yellow]Execution completed but goal may not have been achieved.[/]")
+                
         except ValueError as e:
             if "does not support vision" in str(e):
                 console.print(f"[bold red]Vision Error:[/] {e}")

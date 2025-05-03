@@ -18,9 +18,7 @@ from droidrun.tools import (
     swipe,
     input_text,
     press_key,
-    start_app,
     take_screenshot,
-    list_packages,
     get_clickables,
     get_phone_state,
     complete,
@@ -33,7 +31,8 @@ from droidrun.tools.remember import remember
 from droidrun.tools.memory_store import get_memories, clear_memories
 
 # Import LLM reasoning
-from .llm_reasoning import LLMReasoner
+from .react_llm_reasoner import ReActLLMReasoner
+from ..app_starter.app_starter_agent import AppStarterAgent
 
 # Set up logger
 logger = logging.getLogger("droidrun")
@@ -111,9 +110,10 @@ class ReActAgent:
     def __init__(
         self, 
         task: Optional[str] = None,
-        llm: LLMReasoner = None,
+        llm: ReActLLMReasoner = None,
         device_serial: Optional[str] = None,
-        max_steps: int = 100
+        max_steps: int = 100,
+        app_starter: Optional[AppStarterAgent] = None
     ):
         """Initialize the ReAct agent.
         
@@ -122,15 +122,20 @@ class ReActAgent:
             llm: Initialized LLMReasoner instance
             device_serial: Serial number of the Android device to control
             max_steps: Maximum number of steps to take
+            app_starter: AppStarterAgent instance for app management
         """
         if llm is None:
             raise ValueError("LLMReasoner instance is required")
+            
+        if app_starter is None:
+            raise ValueError("AppStarterAgent instance is required")
             
         self.device_serial = device_serial
         self.goal = task  # Store task as goal for backward compatibility
         self.max_steps = max_steps
         self.reasoner = llm
         self.use_llm = True
+        self.app_starter = app_starter
         
         # Initialize steps list
         self.steps: List[ReActStep] = []
@@ -152,9 +157,8 @@ class ReActAgent:
             "input_text": input_text,
             "press_key": press_key,
             
-            # App management
-            "start_app": start_app,
-            "list_packages": list_packages,
+            # App management (high-level)
+            "start_app": self._start_app,
             
             # Goal management
             "complete": complete,
@@ -170,31 +174,7 @@ class ReActAgent:
             
         self.tools["remember"] = remember_wrapper
         
-        # Add plan tool
-        async def plan_wrapper(title: str, next_step: str, confidence: float = 0.8) -> str:
-            """Create a structured plan for achieving the goal.
-            
-            Args:
-                title: A concise title for this plan
-                steps: Detailed steps to achieve the goal
-                confidence: How confident you are about this plan (0.0 to 1.0)
-            
-            Returns:
-                Confirmation message with plan details
-            """
-            # Format the plan content
-            plan_content = f"Plan: {title}\nNext Step: {next_step}\nConfidence: {confidence:.2f}"
-            
-            # Add as a PLAN step for clearer UI integration
-            await self.add_step(ReActStepType.PLAN, plan_content)
-            
-            return f"Plan recorded: {title} (confidence: {confidence:.2f})"
-            
-        self.tools["plan"] = plan_wrapper
-        
-        # Add screenshot tool only if vision is enabled in the LLM
         if self.reasoner.provider.vision:
-            self.tools["take_screenshot"] = take_screenshot
             logger.info("Vision capabilities enabled: screenshot tool available")
         else:
             logger.info("Vision capabilities disabled: screenshot tool not available")
@@ -203,6 +183,34 @@ class ReActAgent:
         self.device_manager = DeviceManager()
         
         logger.info(f"Using LLM reasoner: provider={llm.llm_provider}, model={llm.provider.model_name}")
+
+    async def _start_app(self, name: str) -> Dict[str, Any]:
+        """High-level tool for starting apps using AppStarterAgent.
+        
+        Args:
+            app_name: Name or description of the app to start
+            
+        Returns:
+            Result of the start attempt
+        """
+        try:
+            # Delegate to AppStarterAgent
+            result = await self.app_starter.start_app(name)
+            
+            if result["success"]:
+                return result["details"]
+            else:
+                return {
+                    "success": False,
+                    "error": result["explanation"]
+                }
+                
+        except Exception as e:
+            logger.error(f"Error starting app: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
     async def connect(self) -> bool:
         """Connect to the specified device.
@@ -334,14 +342,26 @@ class ReActAgent:
             logger.error(f"Error processing tool {tool_name}: {e}")
             return f"Error processing tool: {str(e)}"
     
-    async def run(self) -> List[ReActStep]:
+    async def run(self, goal: Optional[str] = None) -> tuple[List[ReActStep], int]:
         """Run the ReAct agent to achieve the goal.
         
+        Args:
+            goal: Optional goal to set before running. If not provided, uses existing goal.
+            
         Returns:
-            List of steps taken during execution
+            Tuple containing:
+            - List of steps taken during execution
+            - Count of action steps performed
         """
+        # Update goal if provided
+        if goal is not None:
+            self.goal = goal
+            
         if not self.goal:
-            raise ValueError("No goal specified")
+            raise ValueError("No goal specified. Set goal before running or provide it as parameter.")
+        
+        # Reset steps list for new run
+        self.steps = []
         
         # Connect to device
         if not await self.connect():
@@ -349,16 +369,17 @@ class ReActAgent:
                 ReActStepType.OBSERVATION, 
                 "Failed to connect to device"
             )
-            return self.steps
+            return self.steps, 0
         
         # Add initial goal step
         await self.add_step(ReActStepType.GOAL, self.goal)
         
         # Continue with ReAct loop
         step_count = 0
+        action_count = 0
         goal_achieved = False
         
-        while step_count < self.max_steps and not goal_achieved:
+        while action_count < self.max_steps and not goal_achieved:
             # Generate next step using LLM reasoning
             if self.use_llm and self.reasoner:
                 try:
@@ -376,6 +397,14 @@ class ReActAgent:
 
                     # Get available tool names
                     available_tools = list(self.tools.keys())
+
+
+                   # preprocessed_ui_data = await self.reasoner.preprocess_ui(
+                    #    goal=self.goal,
+                    #    history=history,
+                    #    current_ui_state=current_ui_state["clickable_elements"],
+                    #    screenshot_data=screenshot_data
+                    #)
                     
                     # Get LLM reasoning, passing the last screenshot if available and memories from the memory store
                     reasoning_result = await self.reasoner.reason(
@@ -412,6 +441,8 @@ class ReActAgent:
                         try:
                             # Execute the tool
                             result = await self.execute_tool(action, **parameters)
+                            # Increment action count when a valid tool is executed
+                            action_count += 1
                             # Check if the complete tool was called
                             if action == "complete":
                                 goal_achieved = True
@@ -461,12 +492,12 @@ class ReActAgent:
         if goal_achieved:
             await self.add_step(
                 ReActStepType.OBSERVATION, 
-                f"Goal achieved in {step_count} steps."
+                f"Goal achieved in {step_count} steps with {action_count} actions."
             )
         elif step_count >= self.max_steps:
             await self.add_step(
                 ReActStepType.OBSERVATION, 
-                f"Maximum steps ({self.max_steps}) reached without achieving goal."
+                f"Maximum steps ({self.max_steps}) reached without achieving goal. Performed {action_count} actions."
             )
         
-        return self.steps 
+        return self.steps, action_count 

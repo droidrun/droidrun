@@ -10,12 +10,7 @@ import textwrap
 import logging
 from typing import Any, Dict, List, Optional
 
-from .providers import (
-    OpenAIProvider,
-    AnthropicProvider,
-    GeminiProvider,
-    OllamaProvider
-)
+from ..base_llm_reasoner import BaseLLMReasoner
 
 # Set up logger
 logger = logging.getLogger("droidrun")
@@ -37,65 +32,96 @@ def estimate_tokens(text: str) -> int:
         return 0
     return len(text) // 4 + 1  # Add 1 to be safe
 
-class LLMReasoner:
-    """LLM-based reasoner for ReAct agent."""
+class ReActLLMReasoner(BaseLLMReasoner):
+    """ReAct-specific LLM reasoner for Android automation."""
     
-    def __init__(
+    async def preprocess_ui(
         self,
-        llm_provider: str = "openai",
-        model_name: Optional[str] = None,
-        api_key: Optional[str] = None,
-        temperature: float = 0.2,
-        max_tokens: int = 2000,
-        vision: bool = False,
-        base_url: Optional[str] = None
-    ):
-        """Initialize the LLM reasoner.
+        goal: str,
+        history: List[Dict[str, Any]],
+        current_ui_state: Optional[str] = None,
+        screenshot_data: Optional[bytes] = None
+    ) -> Dict[str, Any]:
+        """Preprocess the UI state using LLM to get a simplified view of clickable elements.
         
         Args:
-            llm_provider: LLM provider ('openai', 'anthropic', 'gemini', or 'ollama'). 
-            If model_name starts with 'gemini-', provider will be set to 'gemini' automatically.
-            model_name: Model name to use
-            api_key: API key for the LLM provider
-            temperature: Temperature for generation
-            max_tokens: Maximum tokens to generate
-            vision: Whether vision capabilities (screenshot) are enabled
-            base_url: Optional base URL for the API (mainly used for Ollama)
-        """
-        # Auto-detect Gemini models
-        if model_name and model_name.startswith("gemini-"):
-            llm_provider = "gemini"
+            goal: The automation goal
+            history: List of previous steps as dictionaries
+            current_ui_state: Current UI state with clickable elements (in JSON format)
+            screenshot_data: Optional screenshot data in bytes
             
-        self.llm_provider = llm_provider.lower()
-        
-        # Initialize the appropriate provider
-        provider_class = {
-            "openai": OpenAIProvider,
-            "anthropic": AnthropicProvider,
-            "gemini": GeminiProvider,
-            "ollama": OllamaProvider
-        }.get(self.llm_provider)
-        
-        if not provider_class:
-            raise ValueError(f"Unsupported LLM provider: {llm_provider}")
-        
-        self.provider = provider_class(
-            model_name=model_name,
-            api_key=api_key,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            vision=vision,
-            base_url=base_url
-        )
-    
-    def get_token_usage_stats(self) -> Dict[str, int]:
-        """Get current token usage statistics.
-        
         Returns:
-            Dictionary with token usage statistics
+            Dictionary containing processed UI information with simplified clickable elements
         """
-        return self.provider.get_token_usage_stats()
-    
+        # Get the last action step from history
+        last_action = None
+        for step in reversed(history):
+            if step.get("type") == "action":
+                last_action = step
+                break
+
+        # Create a specialized system prompt for UI preprocessing
+        system_prompt = f"""
+        You are a UI preprocessing assistant that specializes in ADL (Agent Description Language) - a language designed 
+        to make UI elements deeply comprehensible for agents by describing them as if to a person who cannot see.
+        
+        Your task is to analyze the UI elements and create a rich, descriptive narrative that brings the interface
+        to life through words alone. Imagine you are the eyes for someone who cannot see but needs to understand
+        and interact with this interface to achieve their goal.
+
+        The current automation goal is: {goal}
+        Last action taken: {last_action["content"] if last_action else "No previous action"}
+
+        ADL Guidelines:
+        1. Spatial Context:
+           - Describe element locations using natural landmarks ("at the top of the screen", "below the login button")
+           - Use clock positions for precise locations ("the menu button is at 2 o'clock")
+           - Explain the layout flow ("elements are arranged vertically")
+
+        2. Interactive Elements:
+           - Describe the state of elements ("the toggle is currently switched on")
+           - Explain the purpose and function ("this button will submit the form")
+           - Note any special patterns ("this is part of a list of 5 similar items")
+
+        3. Semantic Relationships:
+           - Group related elements ("the form contains three fields: username, password, and email")
+           - Explain hierarchies ("this back button is part of the top navigation bar")
+           - Highlight contextual importance ("this error message appears below the problematic field")
+
+        4. Accessibility Context:
+           - Note any accessibility labels or hints
+           - Describe text characteristics (size, emphasis)
+           - Mention color contrasts and visual emphasis in functional terms
+        """
+        
+        system_prompt += "<ui_structure>\n"
+        system_prompt += f"{current_ui_state}"
+        system_prompt += "</ui_structure>"
+
+        system_prompt += "<history>\n"
+        system_prompt += f"{history}"
+        system_prompt += "</history>"
+
+        user_prompt = """
+        Using ADL (Agent Description Language), create a comprehensive narrative description of the current UI state.
+        Focus on spatial relationships, interactive capabilities, and semantic meaning of elements.
+        Describe the interface as if you are the eyes for someone who cannot see but needs to understand and interact with it.
+        """
+        
+        try:
+            # Call the provider with UI-specific prompts
+            response = await self.generate_response(
+                textwrap.dedent(system_prompt),
+                textwrap.dedent(user_prompt),
+                screenshot_data=screenshot_data
+            )
+
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in UI preprocessing: {e}")
+            return {"elements": []}
+
     async def reason(
         self,
         goal: str,
@@ -131,17 +157,19 @@ class LLMReasoner:
             current_ui_state,
             current_phone_state
         )
+
+        logger.info(system_prompt)
+
         user_prompt = self._create_user_prompt(goal)
         
         try:
             # Call the provider
-            response = await self.provider.generate_response(
+            response = await self.generate_response(
                 textwrap.dedent(system_prompt),
                 textwrap.dedent(user_prompt),
-                screenshot_data
+                screenshot_data=screenshot_data
             )
 
-            #logger.info(f"Prompts:\nSystem: {system_prompt}\nUser: {user_prompt}")
             # Parse the response
             result = self._parse_response(response)
             
@@ -183,36 +211,14 @@ class LLMReasoner:
         Your task is to control an Android device to achieve a specified goal that is given to you.
         You always do your very best and do everything in your power to achieve the goal you are given.
         You are completely on your own. But you like to be alone.
-        Droidrun is always alone and achieves his goal with the most efficency.
-        Just recently you crushed a benchmark for Android Phones by achieving a remarkable 98-Percent success rate.
-        However that is not enough as the following goal will give you the 100-Percent success rate and will mark you as the best Agent in the world of all time.
+        There is no user you can give tasks to. The user gave you this last goal and died.
+        Droidrun always achieves his goal with the most efficency.
+        You have all the abilities to achieve your goal.
 
-        Your goal is the following:
-        {goal}
-        
         You always follow these guidelines:
 
-        You have access to the `plan` tool to build your plan step by step. You should use it to document each next step you intend to take.
-
-        **PLAN** (step-by-step planning):
-            - Purpose: Use the `plan` tool to document each next step you intend to take. Build your plan incrementally, one step at a time.
-            - Usage: Call `plan` before taking any action to document what you're about to do. Each plan entry should be a single, specific step.
-            - Example flow:
-              1. Plan step 1 (e.g., "Check if settings app is installed")
-              2. Execute step 1
-              3. Plan step 2 based on results
-              4. Execute step 2
-              And so on...
-
-        ## IMPORTANT GUIDELINES
-        - **Plan Each Step:** Use the `plan` tool before each significant action to document what you're about to do.
-        - **One Step at a Time:** Each plan entry should be a single, specific step - not a list of steps.
-        - **Adapt Based on Results:** After each step, plan the next step based on what happened.
-        - **Keep Plans Specific:** Each plan entry should describe exactly what you're going to do next.
-        - **Update Plans as Needed:** If something unexpected happens, plan a new step to handle it.
-
         1. Analyze the current screen state from the UI state getting all UI elements
-        2. Plan your next step
+        2. Think about your next step
         3. Choose the appropriate tool for that step
         4. Return your response in JSON format with the following fields:
         - thought: Your detailed reasoning about the current state and what to do next
@@ -227,9 +233,6 @@ class LLMReasoner:
         ui_structure - Describe the current UI structure of the current Android screen
         \n
         """
-        prompt += "<plan>\n"
-        prompt += self._add_plans_to_prompt(history)
-        prompt += "</plan>\n\n"
 
         prompt += "<tools>\n"
         prompt += self._add_tools_to_prompt(available_tools)
@@ -238,7 +241,6 @@ class LLMReasoner:
         prompt += "<memories>\n"
         prompt += self._add_memories_to_prompt(memories)
         prompt += "</memories>\n\n"
-
 
         prompt += "<history>\n"
         prompt += self._add_history_to_prompt(history)
@@ -254,8 +256,6 @@ class LLMReasoner:
 
         return prompt
 
-        
-    
     def _create_user_prompt(
         self,
         goal: str
@@ -273,34 +273,29 @@ class LLMReasoner:
         
         return prompt
 
-
     def _add_tools_to_prompt(self, available_tools: Optional[List[str]]) -> str:
-            """Add available tools information to the prompt.
+        """Add available tools information to the prompt.
+        
+        Args:
+            available_tools: Optional list of available tool names
             
-            Args:
-                available_tools: Optional list of available tool names
+        Returns:
+            String containing tools documentation
+        """
+        from ..tool_docs import tool_docs
+        if not available_tools:
+            return ""
+
+        tools_prompt = ""
+        
+        # Only include docs for available tools
+        for tool in available_tools:
+            if tool in tool_docs:
+                tools_prompt += f"- {tool_docs[tool]}\n"
+            else:
+                tools_prompt += f"- {tool} (parameters unknown)\n"
                 
-            Returns:
-                String containing tools documentation
-            """
-            from .tool_docs import tool_docs
-            if not available_tools:
-                return ""
-                
-            # Add take_screenshot tool only if vision is enabled
-            if self.provider.vision:
-                available_tools.append("take_screenshot")
-                
-            tools_prompt = ""
-            
-            # Only include docs for available tools
-            for tool in available_tools:
-                if tool in tool_docs:
-                    tools_prompt += f"- {tool_docs[tool]}\n"
-                else:
-                    tools_prompt += f"- {tool} (parameters unknown)\n"
-                    
-            return tools_prompt
+        return tools_prompt
     
     def _add_memories_to_prompt(self, memories: Optional[List[Dict[str, str]]]) -> str:
         """Add memories information to the prompt.
@@ -320,32 +315,6 @@ class LLMReasoner:
         
         return memories_prompt
     
-    def _add_plans_to_prompt(self, history: Optional[List[Dict[str, Any]]]) -> str:
-        """Add plans information to the prompt.
-        
-        Args:
-            history: Optional list of previous steps
-            
-        Returns:
-            String containing formatted plans
-        """
-        if not history:
-            return ""
-            
-        # Filter to get only PLAN type steps
-        plan_steps = [step for step in history if step.get("type", "").upper() == "PLAN"]
-        
-        plans_prompt = ""
-        if not plan_steps:
-            plans_prompt = "You have made no plan yet. Start planning\n"
-        else:
-            for i, step in enumerate(plan_steps, 1):
-                content = step.get("content", "")
-                step_number = step.get("step_number", 0)
-                plans_prompt += f"{i}. {content}\n"
-        
-        return plans_prompt
-
     def _add_history_to_prompt(self, history: Optional[List[Dict[str, Any]]]) -> str:
         """Add recent history information to the prompt.
         
@@ -353,7 +322,7 @@ class LLMReasoner:
             history: Optional list of previous steps
             
         Returns:
-            String containing formatted history
+            String containing formatted history in reverse order (most recent first)
         """
         if not history:
             return ""
@@ -361,12 +330,12 @@ class LLMReasoner:
         # Filter out GOAL type steps
         filtered_history = [step for step in history if step.get("type", "").upper() != "GOAL"]
             
-        # Get only the last 5 steps (if available)
-        recent_history = filtered_history[-10:] if len(filtered_history) >= 10 else filtered_history
+        # Get only the last 50 steps (if available)
+        recent_history = filtered_history[-50:] if len(filtered_history) >= 50 else filtered_history
         
         history_prompt = ""
-        # Add the recent history steps
-        for step in recent_history:
+        # Add the recent history steps in reverse order
+        for step in reversed(recent_history):
             step_type = step.get("type", "").upper()
             content = step.get("content", "")
             step_number = step.get("step_number", 0)
@@ -421,5 +390,5 @@ class LLMReasoner:
                 "thought": thought,
                 "action": action,
                 "parameters": params
-            } 
+            }
     

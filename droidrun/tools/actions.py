@@ -194,7 +194,7 @@ async def get_clickables(serial: Optional[str] = None) -> str:
     except Exception as e:
         raise ValueError(f"Error getting clickable elements: {e}")
 
-async def tap_by_index(index: int, serial: Optional[str] = None) -> str:
+async def tap_by_index(index: int, longpress: bool = False, serial: Optional[str] = None) -> str:
     """
     Tap on a UI element by its index.
     
@@ -277,10 +277,13 @@ async def tap_by_index(index: int, serial: Optional[str] = None) -> str:
         else:
             device = await get_device()
         
-        await device.tap(x, y)
+        if longpress == True:
+            await device._adb.shell(device._serial, f'input swipe {x} {y} {x} {y} 1000')
+        else:
+            await device.tap(x, y)
         
         # Add a small delay to allow UI to update
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(2)
         
         
         # Create a descriptive response
@@ -329,7 +332,7 @@ async def tap_by_coordinates(x: int, y: int, serial: Optional[str] = None) -> st
         return f"Error: {str(e)}"
 
 # Replace the old tap function with the new one
-async def tap(index: int, serial: Optional[str] = None) -> str:
+async def tap(index: int, longpress: bool = False, serial: Optional[str] = None) -> str:
     """
     Tap on a UI element by its index.
     
@@ -343,7 +346,7 @@ async def tap(index: int, serial: Optional[str] = None) -> str:
     Returns:
         Result message
     """
-    return await tap_by_index(index, serial)
+    return await tap_by_index(index, longpress, serial)
 
 async def swipe(
     start_x: int,
@@ -398,16 +401,24 @@ async def input_text(text: str, serial: Optional[str] = None) -> str:
         # Function to escape special characters
         def escape_text(s: str) -> str:
             # Escape special characters that need shell escaping, excluding space
-            special_chars = '[]()|&;$<>\\`"\'{}#!?^~'  # Removed space from special chars
+            special_chars = '[]()|&;$<>\\`"\'{}#^~'  # Removed ! from special chars
             escaped = ''
             for c in s:
                 if c == ' ':
                     escaped += ' '  # Just add space without escaping
+                elif c == '!':
+                    escaped += '\\\\!'  # Double escape for exclamation mark
                 elif c in special_chars:
                     escaped += '\\' + c
                 else:
                     escaped += c
             return escaped
+        
+
+        # Select all text (Ctrl+A using keycombination)
+        await device._adb.shell(device._serial, 'input keycombination 113 29')
+        # Delete selected text
+        await device._adb.shell(device._serial, 'input keyevent KEYCODE_DEL')
         
         # Split text into smaller chunks (max 500 chars)
         chunk_size = 500
@@ -441,6 +452,12 @@ async def input_text(text: str, serial: Optional[str] = None) -> str:
             
             # Small delay between chunks
             await asyncio.sleep(0.1)
+        
+        # Hide keyboard using back button
+        await device._adb.shell(device._serial, 'input keyevent KEYCODE_BACK')
+
+        #sleep to stabilize UI after keyboard dismissing
+        await asyncio.sleep(2)
         
         return f"Text input completed: {text}"
     except ValueError as e:
@@ -782,13 +799,13 @@ async def get_all_elements(serial: Optional[str] = None) -> Dict[str, Any]:
 
 async def get_phone_state(serial: Optional[str] = None) -> Dict[str, Any]:
     """
-    Get the current phone state including current activity and keyboard visibility.
+    Get the current phone state including current activity and screen size in pixels.
     
     Args:
         serial: Optional device serial number
     
     Returns:
-        Dictionary with current phone state information
+        Dictionary with current phone state information including screen dimensions
     """
     try:
         # Get the device
@@ -807,23 +824,27 @@ async def get_phone_state(serial: Optional[str] = None) -> Dict[str, Any]:
             # Try alternative command for older Android versions
             activity_output = await device._adb.shell(device._serial, "dumpsys activity activities | grep ResumedActivity")
         
-        # Get keyboard visibility state
-        keyboard_output = await device._adb.shell(device._serial, "dumpsys input_method | grep mInputShown")
+        # Get screen size using wm size command
+        screen_output = await device._adb.shell(device._serial, "wm size")
         
         # Process activity information
         current_activity = "Unable to determine current activity"
         if activity_output:
             current_activity = activity_output.strip()
         
-        # Process keyboard information
-        is_keyboard_shown = False
-        if keyboard_output:
-            is_keyboard_shown = "mInputShown=true" in keyboard_output
+        # Process screen size information
+        screen_size = {"width": 0, "height": 0}
+        if screen_output:
+            # Parse output like "Physical size: 1080x2400"
+            match = re.search(r"Physical size: (\d+)x(\d+)", screen_output)
+            if match:
+                screen_size["width"] = int(match.group(1))
+                screen_size["height"] = int(match.group(2))
         
         # Return combined state
         return {
             "current_activity": current_activity,
-            "keyboard_shown": is_keyboard_shown,
+            "screen_size": screen_size,
         }
         
     except Exception as e:
