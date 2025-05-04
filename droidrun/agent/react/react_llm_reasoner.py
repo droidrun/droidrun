@@ -158,8 +158,6 @@ class ReActLLMReasoner(BaseLLMReasoner):
             current_phone_state
         )
 
-        logger.info(system_prompt)
-
         user_prompt = self._create_user_prompt(goal)
         
         try:
@@ -213,7 +211,11 @@ class ReActLLMReasoner(BaseLLMReasoner):
         You are completely on your own. But you like to be alone.
         There is no user you can give tasks to. The user gave you this last goal and died.
         Droidrun always achieves his goal with the most efficency.
+        Droidrun does exactly what the goal is - nothing more nothing less.
         You have all the abilities to achieve your goal.
+        When you want to start an app ALWAYS use the start app tool.
+        NEVER try to open apps via UI interactions.
+
 
         You always follow these guidelines:
 

@@ -32,7 +32,6 @@ from droidrun.tools.memory_store import get_memories, clear_memories
 
 # Import LLM reasoning
 from .react_llm_reasoner import ReActLLMReasoner
-from ..app_starter.app_starter_agent import AppStarterAgent
 
 # Set up logger
 logger = logging.getLogger("droidrun")
@@ -42,7 +41,6 @@ class ReActStepType(Enum):
     THOUGHT = "thought"  # Internal reasoning step
     ACTION = "action"    # Taking an action
     OBSERVATION = "observation"  # Observing the result
-    PLAN = "plan"        # Planning future steps
     GOAL = "goal"        # Setting or refining the goal
     MEMORY = "memory"    # Remembered information
 
@@ -95,8 +93,6 @@ class ReActStep:
             return f"🔄 Step {self.step_number} - ACTION: {self.content}"
         elif self.step_type == ReActStepType.OBSERVATION:
             return f"👁️ Step {self.step_number} - OBSERVATION: {self.content}"
-        elif self.step_type == ReActStepType.PLAN:
-            return f"📝 Step {self.step_number} - PLAN: {self.content}"
         elif self.step_type == ReActStepType.GOAL:
             return f"🎯 Step {self.step_number} - GOAL: {self.content}"
         elif self.step_type == ReActStepType.MEMORY:
@@ -113,7 +109,6 @@ class ReActAgent:
         llm: ReActLLMReasoner = None,
         device_serial: Optional[str] = None,
         max_steps: int = 100,
-        app_starter: Optional[AppStarterAgent] = None
     ):
         """Initialize the ReAct agent.
         
@@ -122,20 +117,15 @@ class ReActAgent:
             llm: Initialized LLMReasoner instance
             device_serial: Serial number of the Android device to control
             max_steps: Maximum number of steps to take
-            app_starter: AppStarterAgent instance for app management
         """
         if llm is None:
             raise ValueError("LLMReasoner instance is required")
-            
-        if app_starter is None:
-            raise ValueError("AppStarterAgent instance is required")
             
         self.device_serial = device_serial
         self.goal = task  # Store task as goal for backward compatibility
         self.max_steps = max_steps
         self.reasoner = llm
         self.use_llm = True
-        self.app_starter = app_starter
         
         # Initialize steps list
         self.steps: List[ReActStep] = []
@@ -157,10 +147,6 @@ class ReActAgent:
             "input_text": input_text,
             "press_key": press_key,
             
-            # App management (high-level)
-            "start_app": self._start_app,
-            
-            # Goal management
             "complete": complete,
         }
         
@@ -184,34 +170,6 @@ class ReActAgent:
         
         logger.info(f"Using LLM reasoner: provider={llm.llm_provider}, model={llm.provider.model_name}")
 
-    async def _start_app(self, name: str) -> Dict[str, Any]:
-        """High-level tool for starting apps using AppStarterAgent.
-        
-        Args:
-            app_name: Name or description of the app to start
-            
-        Returns:
-            Result of the start attempt
-        """
-        try:
-            # Delegate to AppStarterAgent
-            result = await self.app_starter.start_app(name)
-            
-            if result["success"]:
-                return result["details"]
-            else:
-                return {
-                    "success": False,
-                    "error": result["explanation"]
-                }
-                
-        except Exception as e:
-            logger.error(f"Error starting app: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
     async def connect(self) -> bool:
         """Connect to the specified device.
         

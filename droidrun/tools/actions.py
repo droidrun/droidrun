@@ -454,7 +454,7 @@ async def input_text(text: str, serial: Optional[str] = None) -> str:
             await asyncio.sleep(0.1)
         
         # Hide keyboard using back button
-        await device._adb.shell(device._serial, 'input keyevent KEYCODE_BACK')
+        #await device._adb.shell(device._serial, 'input keyevent KEYCODE_BACK')
 
         #sleep to stabilize UI after keyboard dismissing
         await asyncio.sleep(2)

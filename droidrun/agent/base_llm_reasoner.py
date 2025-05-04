@@ -71,7 +71,6 @@ class BaseLLMReasoner:
         self,
         system_prompt: str,
         user_prompt: str,
-        additional_context: Optional[Dict[str, Any]] = None,
         screenshot_data: Optional[bytes] = None
     ) -> str:
         """Generate a response using the LLM.
@@ -79,14 +78,14 @@ class BaseLLMReasoner:
         Args:
             system_prompt: System prompt string
             user_prompt: User prompt string
-            additional_context: Optional additional context
-            screenshot_data: Optional screenshot data
+            screenshot_data: Optional screenshot data for vision tasks
+            additional_context: Optional additional context dictionary
             
         Returns:
             Generated response string
         """
         return await self.provider.generate_response(
-            system_prompt,
-            user_prompt,
-            screenshot_data
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            screenshot_data=screenshot_data
         ) 

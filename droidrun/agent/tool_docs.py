@@ -11,8 +11,6 @@ tool_docs = {
     
     "press_key": "press_key(keycode: int) - Press a key on the device using keycode",
     
-    "start_app": "start_app(name: str) - IMPORTANT: ALWAYS use this to Start an app using its name (e.g., 'Google Playstore' or 'Youtube')",
-    
     "complete": "complete(result: str) - IMPORTANT: This tool should ONLY be called after you have ACTUALLY completed all necessary actions for the goal. It does not perform any actions itself - it only signals that you have already achieved the goal through other actions. Include a summary of what was accomplished as the result parameter.",
     
 }
