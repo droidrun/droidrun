@@ -8,8 +8,9 @@ for an app description and launches it.
 import logging
 from typing import Any, Dict, List, Optional
 
-from ..base_llm_reasoner import BaseLLMReasoner
+from ..base.base_llm_reasoner import BaseLLMReasoner
 from droidrun.tools import list_packages, start_app
+from ..base.base_agent import BaseAgent, TaskContext, TaskResult
 
 # Set up logger
 logger = logging.getLogger("droidrun")
@@ -91,7 +92,7 @@ class AppStarterLLMReasoner(BaseLLMReasoner):
                 "confidence": 0,
             }
 
-class AppStarterAgent:
+class AppStarterAgent(BaseAgent):
     """Agent specialized in starting Android apps."""
     
     def __init__(
@@ -106,7 +107,12 @@ class AppStarterAgent:
         self.reasoner = llm
         self.device_serial = device_serial
 
-    async def start_app(self, app_name: str) -> Dict[str, Any]:
+    async def execute_task(self, ctx: TaskContext) -> TaskResult:
+        """Execute the task."""
+        # FIXME: return type does not match TaskResult
+        return await self._start_app(ctx["task"])
+
+    async def _start_app(self, app_name: str) -> Dict[str, Any]:
         """Start the specified app.
         
         Args:

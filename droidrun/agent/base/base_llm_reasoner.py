@@ -6,7 +6,7 @@ This module provides the base class that all LLM reasoners must extend.
 
 from typing import Any, Dict, List, Optional
 
-from .providers import (
+from ..providers import (
     OpenAIProvider,
     AnthropicProvider,
     GeminiProvider,

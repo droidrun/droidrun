@@ -12,7 +12,7 @@ from .react.react_llm_reasoner import ReActLLMReasoner
 from .react.react_agent import ReActAgent
 from .app_starter.app_starter_agent import AppStarterAgent, AppStarterLLMReasoner
 from .planner.planner_agent import DroidPlanner
-from .manager.task_manager_agent import TaskManagerAgent
+from .manager.task_manager_agent import TaskManagerAgent, TaskManagerAgentConfig
 
 # Set up logger
 logger = logging.getLogger("droidrun")
@@ -88,8 +88,20 @@ class DroidAgent:
         # Initialize Task Manager Agent
         self.task_manager = TaskManagerAgent(
             llm=self.react_llm,
-            react_agent=self.react,
-            app_starter_agent=self.app_starter,
+            agents=[
+                TaskManagerAgentConfig(
+                    name="AppStarterAgent",
+                    agent=self.app_starter,
+                    description="Agent that starts apps"
+                ),
+                # FIXME: ReActAgent is not a BaseAgent. needs to be replaced with CodeActAgent
+                TaskManagerAgentConfig(
+                    name="ReActAgent",
+                    agent=self.react,
+                    description="Agent that performs actions on the screen"
+                )
+            ],
+            fallback_agent="ReActAgent",
             device_serial=device_serial
         )
         
