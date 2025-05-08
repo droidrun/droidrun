@@ -1,4 +1,3 @@
-
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./static/droidrun-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="./static/droidrun.png">
@@ -273,3 +272,26 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## 📄 License
 
 This project is licensed under the MIT License - see the LICENSE file for details. 
+
+## Security Checks
+
+To ensure the security of the codebase, we have integrated security checks using `bandit` and `safety`. These tools help identify potential security issues in the code and dependencies.
+
+### Running Security Checks
+
+Before submitting any code, please run the following security checks:
+
+1. **Bandit**: A tool to find common security issues in Python code.
+   ```bash
+   bandit -r droidrun
+   ```
+
+2. **Safety**: A tool to check your installed dependencies for known security vulnerabilities.
+   ```bash
+   safety check
+   ```
+
+You can also run both checks using the provided script:
+```bash
+python -m droidrun.tools.security_check
+```

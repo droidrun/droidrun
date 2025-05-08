@@ -64,6 +64,29 @@ Thank you for your interest in contributing to DroidRun! This document provides 
 - Check our [Documentation](https://docs.droidrun.ai)
 - Report bugs and request features through [GitHub Issues](https://github.com/droidrun/droidrun/issues)
 
+## Security Checks
+
+To ensure the security of the codebase, we have integrated security checks using `bandit` and `safety`. These tools help identify potential security issues in the code and dependencies.
+
+### Running Security Checks
+
+Before submitting any code, please run the following security checks:
+
+1. **Bandit**: A tool to find common security issues in Python code.
+   ```bash
+   bandit -r droidrun
+   ```
+
+2. **Safety**: A tool to check your installed dependencies for known security vulnerabilities.
+   ```bash
+   safety check
+   ```
+
+You can also run both checks using the provided script:
+```bash
+python -m droidrun.tools.security_check
+```
+
 ## Pull Request Process
 
 1. Update documentation for any modified functionality
