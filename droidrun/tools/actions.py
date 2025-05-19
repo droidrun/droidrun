@@ -454,8 +454,7 @@ async def swipe(
 
 async def input_text(text: str, serial: Optional[str] = None) -> str:
     """
-    Input text on the device.
-    
+    Input text on the device,支持中文（优先ADBKeyBoard/ADBInput输入法，若无则尝试剪贴板+粘贴）。
     Args:
         text: Text to input. Can contain spaces and special characters.
         serial: Optional device serial (for backward compatibility)
@@ -468,8 +467,29 @@ async def input_text(text: str, serial: Optional[str] = None) -> str:
                 return f"Error: Device {serial} not found"
         else:
             device = await get_device()
-        
-        # Function to escape special characters
+
+        # 检测是否包含中文字符
+        contains_chinese = any(ord(c) > 127 for c in text)
+        warn = ""
+        if contains_chinese:
+            # 检查是否已安装ADBKeyBoard/ADBInput
+            check_ime_cmd = 'ime list -s'
+            ime_list = await device._adb.shell(device._serial, check_ime_cmd)
+            has_adbime = any(ime in ime_list for ime in ["com.android.adbkeyboard/.AdbIME", "com.android.adbinput/.AdbIME"])
+            # 获取当前输入法
+            current_ime = await device._adb.shell(device._serial, 'settings get secure default_input_method')
+            # 如果已安装ADBKeyBoard/ADBInput且为当前输入法，优先用broadcast
+            if has_adbime and ("adbkeyboard" in current_ime.lower() or "adbinput" in current_ime.lower()):
+                await device._adb.shell(device._serial, f'am broadcast -a ADB_INPUT_TEXT --es msg "{text}"')
+                return f"[ADBKeyBoard/ADBInput] 中文输入完成: {text}"
+            # 尝试剪贴板+粘贴方案
+            try:
+                await device._adb.shell(device._serial, f'am broadcast -a clipper.set -e text "{text}"')
+                await device._adb.shell(device._serial, 'input keyevent 279')
+                return f"[剪贴板粘贴] 中文输入完成: {text}"
+            except Exception as e:
+                warn = f"[剪贴板粘贴失败] {e}\n"
+        # fallback到原有逻辑
         def escape_text(s: str) -> str:
             # Escape special characters that need shell escaping, excluding space
             special_chars = '[]()|&;$<>\\`"\'{}#!?^~'  # Removed space from special chars
@@ -493,9 +513,8 @@ async def input_text(text: str, serial: Optional[str] = None) -> str:
             
             # Try different input methods if one fails
             methods = [
-                f'input text "{escaped_chunk}"',  # Standard method
-                f'am broadcast -a ADB_INPUT_TEXT --es msg "{escaped_chunk}"',  # Broadcast intent method
-                f'input keyboard text "{escaped_chunk}"'  # Keyboard method
+                f'input text "{escaped_chunk}"',
+                f'input keyboard text "{escaped_chunk}"'
             ]
             
             success = False
@@ -515,8 +534,9 @@ async def input_text(text: str, serial: Optional[str] = None) -> str:
             
             # Small delay between chunks
             await asyncio.sleep(0.1)
-        
-        return f"Text input completed: {text}"
+        if contains_chinese:
+            warn += "[警告] 设备未检测到ADBKeyBoard/ADBInput输入法，且剪贴板粘贴可能不被所有ROM支持，中文输入可能失败。建议安装ADBKeyBoard并切换为当前输入法。"
+        return f"Text input completed: {text}{warn}"
     except ValueError as e:
         return f"Error: {str(e)}"
 
