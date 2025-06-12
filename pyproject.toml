@@ -22,7 +22,7 @@ dependencies = [
     "llama-index-llms-deepseek",
     "llama-index-llms-anthropic",
     "llama-index-llms-ollama",
-    "chromadb>=1.0.12",
+    #"chromadb>=1.0.12",
 ]
 requires-python = ">=3.10"
 readme = "README.md"
