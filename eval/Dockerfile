@@ -90,15 +90,14 @@ RUN git clone https://github.com/google-research/android_world.git && \
     sed -i 's/^android_world = /# android_world = /' /opt/shared/android_world/pyproject.toml && \
     sed -i "s/'proto\/\*\.proto'/'proto\/\*\.proto', 'proto\/\*\.textproto'/" /opt/shared/android_world/setup.py
 
-COPY . /opt/shared/droidrun
-#RUN git clone https://github.com/droidrun/droidrun.git
-
 RUN cd /opt/shared/android_world && \
     pip install -r requirements.txt && \
-    python setup.py install && \
-    pip install /opt/shared/droidrun
+    python setup.py install
 
 ENV ANDROID_WORLD_PATH=/opt/shared/android_world/android_world
+
+COPY . /opt/shared/droidrun
+RUN pip install /opt/shared/droidrun
 
 FROM deps AS benchmark
 
