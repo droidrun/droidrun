@@ -229,7 +229,7 @@ class AndroidWorldBenchmark:
         tools_instance = None
         try:
             # Create agent
-            agent, agent_config = await create_agent(
+            agent, agent_config = create_agent(
                 device_serial=self.device_serial,
                 task_description=task_description,
                 llm_provider=self.llm_provider,

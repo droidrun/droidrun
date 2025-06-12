@@ -13,7 +13,8 @@ from droidrun.tools import load_tools
 
 logger = logging.getLogger("android_world_bench")
 
-async def create_agent(
+
+def create_agent(
     device_serial: str,
     task_description: str,
     llm_provider: str,
@@ -23,10 +24,10 @@ async def create_agent(
     timeout: int = 600,
     max_retries: int = 3,
     vision: bool = True,
-    debug: bool = True
+    debug: bool = True,
 ) -> Tuple[DroidAgent, Dict[str, Any]]:
     """Create and configure a DroidRun agent.
-    
+
     Args:
         device_serial: Device serial number
         task_description: Description of the task
@@ -36,24 +37,20 @@ async def create_agent(
         max_steps: Maximum number of steps
         timeout: Timeout in seconds
         max_retries: Maximum number of retries
-        
+
     Returns:
         Tuple of (agent, agent configuration)
     """
     logger.info(f"Creating DroidRun agent for task")
-    
+
     # Load tools
     logger.info(f"Loading tools for device: {device_serial}")
-    tool_list, tools_instance = await load_tools(serial=device_serial)
-    
+    tool_list, tools_instance = load_tools(serial=device_serial)
+
     # Load LLM
     logger.info(f"Loading LLM: provider={llm_provider}, model={llm_model}")
-    llm = load_llm(
-        provider_name=llm_provider,
-        model=llm_model,
-        temperature=temperature
-    )
-    
+    llm = load_llm(provider_name=llm_provider, model=llm_model, temperature=temperature)
+
     # Create agent
     agent = DroidAgent(
         goal=task_description,
@@ -65,9 +62,9 @@ async def create_agent(
         max_retries=max_retries,
         temperature=temperature,
         vision=vision,
-        debug=debug
+        debug=debug,
     )
-    
+
     # Store configuration
     config = {
         "llm_provider": llm_provider,
@@ -76,24 +73,25 @@ async def create_agent(
         "max_steps": max_steps,
         "timeout": timeout,
         "max_retries": max_retries,
-        "vision": vision
+        "vision": vision,
     }
-    
+
     logger.info("Agent created successfully")
     return agent, config
 
+
 async def run_agent(agent: DroidAgent, task_name: str) -> Dict[str, Any]:
     """Run the agent on a task.
-    
+
     Args:
         agent: The agent to run
         task_name: Name of the task
-        
+
     Returns:
         Result data
     """
     logger.info(f"Running agent for task: {task_name}")
-    
+
     try:
         # Run the agent
         result = await agent.run()
@@ -101,4 +99,4 @@ async def run_agent(agent: DroidAgent, task_name: str) -> Dict[str, Any]:
         return result
     except Exception as e:
         logger.error(f"Error running agent for task {task_name}: {e}")
-        return None 
+        return None
