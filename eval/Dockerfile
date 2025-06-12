@@ -109,6 +109,9 @@ WORKDIR /opt/shared
 COPY ./eval/docker .
 
 RUN chmod a+x start_emu_headless.sh && \
-    chmod a+x entrypoint.sh
+    chmod a+x entrypoint.sh && \
+    chmod a+x download-apk.sh
+
+RUN ./download-apk.sh
 
 ENTRYPOINT [ "./entrypoint.sh" ]
