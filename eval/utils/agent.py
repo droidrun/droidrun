@@ -23,7 +23,6 @@ def create_agent(
     max_steps: int = 50,
     timeout: int = 600,
     max_retries: int = 3,
-    vision: bool = True,
     debug: bool = True,
 ) -> Tuple[DroidAgent, Dict[str, Any]]:
     """Create and configure a DroidRun agent.
@@ -43,25 +42,20 @@ def create_agent(
     """
     logger.info(f"Creating DroidRun agent for task")
 
-    # Load tools
-    logger.info(f"Loading tools for device: {device_serial}")
-    tool_list, tools_instance = load_tools(serial=device_serial)
-
     # Load LLM
     logger.info(f"Loading LLM: provider={llm_provider}, model={llm_model}")
     llm = load_llm(provider_name=llm_provider, model=llm_model, temperature=temperature)
 
     # Create agent
+    logger.info(f"Creating DroidAgent for task: {task_description}")
     agent = DroidAgent(
         goal=task_description,
         llm=llm,
-        tools_instance=tools_instance,
-        tool_list=tool_list,
         max_steps=max_steps,
         timeout=timeout,
         max_retries=max_retries,
-        temperature=temperature,
-        vision=vision,
+        device_serial=device_serial,
+        reasoning=True,
         debug=debug,
     )
 
@@ -73,7 +67,6 @@ def create_agent(
         "max_steps": max_steps,
         "timeout": timeout,
         "max_retries": max_retries,
-        "vision": vision,
     }
 
     logger.info("Agent created successfully")

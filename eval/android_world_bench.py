@@ -236,7 +236,6 @@ class AndroidWorldBenchmark:
                 llm_model=self.llm_model,
                 temperature=self.temperature,
                 max_steps=self.max_steps_per_task,
-                vision=True,
                 debug=True,
             )
 
