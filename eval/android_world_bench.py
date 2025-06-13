@@ -248,6 +248,14 @@ class AndroidWorldBenchmark:
             # Run agent
             agent_result = await run_agent(agent, task_name)
 
+            task_dir = os.path.join(
+                self.results_dir, f"task_{task_name.replace(' ', '_')}"
+            )
+
+            task_result["screenshot_gif"] = agent.trajectory.create_screenshot_gif(
+                output_path=os.path.join(task_dir, f"task_execution")
+            )
+
             # Update result with agent information
             task_result = update_result_from_agent(task_result, agent_result, agent)
 
@@ -317,24 +325,6 @@ class AndroidWorldBenchmark:
 
                     # Run the task
                     task_result = await self.run_task(task_name, task_instance)
-
-                    # Save the result with screenshots as GIF if available
-                    if "screenshots" in task_result and task_result["screenshots"]:
-                        from droidrun.agent.utils.trajectory import (
-                            create_screenshot_gif,
-                        )
-
-                        base_path = os.path.join(task_dir, f"task_execution")
-                        gif_path = create_screenshot_gif(
-                            task_result["screenshots"], base_path
-                        )
-                        if gif_path:
-                            task_result["screenshot_gif"] = os.path.basename(gif_path)
-                            logger.info(
-                                f"Created GIF with {len(task_result['screenshots'])} screenshots"
-                            )
-                        # Remove raw screenshots from JSON to keep it clean
-                        del task_result["screenshots"]
 
                     # Save the result JSON
                     json_path = os.path.join(task_dir, "result.json")

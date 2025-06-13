@@ -8,6 +8,7 @@ import logging
 from typing import Dict, Any, List
 from datetime import datetime
 from pathlib import Path
+from droidrun.agent.droid import DroidAgent
 
 logger = logging.getLogger("android_world_bench")
 
@@ -237,7 +238,7 @@ def create_task_result(task_name: str, task_description: str) -> Dict[str, Any]:
     }
 
 
-def update_result_from_agent(result: Dict[str, Any], agent_result: Any, agent: Any) -> Dict[str, Any]:
+def update_result_from_agent(result: Dict[str, Any], agent_result: Any, agent: DroidAgent) -> Dict[str, Any]:
     """Update a task result with information from an agent run.
     
     Args:
@@ -252,15 +253,15 @@ def update_result_from_agent(result: Dict[str, Any], agent_result: Any, agent: A
     if agent_result is not None:
         if isinstance(agent_result, dict):
             # Update with values from result dict
-            if "steps_taken" in agent_result:
-                result["steps_taken"] = agent_result["steps_taken"]
+            if "steps" in agent_result:
+                result["steps_taken"] = agent_result["steps"]
             if "success" in agent_result:
                 result["agent_success"] = agent_result["success"]
             if "logs" in agent_result:
                 result["logs"] = agent_result["logs"]
             # Capture final thought if available
-            if "final_thought" in agent_result:
-                result["final_thought"] = agent_result["final_thought"]
+            if "reason" in agent_result:
+                result["final_thought"] = agent_result["reason"]
             
             # Save trajectory information if available
             if "trajectory" in agent_result:
