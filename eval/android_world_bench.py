@@ -260,8 +260,8 @@ class AndroidWorldBenchmark:
             task_result = update_result_from_agent(task_result, agent_result, agent)
 
             # Add screenshots to result if available
-            if hasattr(tools_instance, "screenshots") and tools_instance.screenshots:
-                task_result["screenshots"] = tools_instance.screenshots
+            #if hasattr(tools_instance, "screenshots") and tools_instance.screenshots:
+            #    task_result["screenshots"] = tools_instance.screenshots
 
         except Exception as e:
             logger.error(f"Error during agent execution: {e}")
