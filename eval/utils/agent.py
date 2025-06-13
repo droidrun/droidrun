@@ -9,7 +9,6 @@ from typing import Dict, Any, Tuple, Optional
 # Import DroidRun modules
 from droidrun.agent.droid import DroidAgent
 from droidrun.agent.utils.llm_picker import load_llm
-from droidrun.tools import load_tools
 
 logger = logging.getLogger("android_world_bench")
 
@@ -23,6 +22,7 @@ def create_agent(
     max_steps: int = 50,
     timeout: int = 600,
     max_retries: int = 3,
+    reasoning: bool = True,
     debug: bool = True,
 ) -> Tuple[DroidAgent, Dict[str, Any]]:
     """Create and configure a DroidRun agent.
@@ -55,7 +55,8 @@ def create_agent(
         timeout=timeout,
         max_retries=max_retries,
         device_serial=device_serial,
-        reasoning=True,
+        reasoning=reasoning,
+        save_trajectories=True,
         debug=debug,
     )
 

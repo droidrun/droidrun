@@ -77,6 +77,7 @@ class AndroidWorldBenchmark:
         progress_file: str = "task_progress.json",
         use_keepalive: bool = True,
         keepalive_interval: int = 5,
+        reasoning: bool = False,
     ):
         """Initialize the benchmark.
 
@@ -104,6 +105,7 @@ class AndroidWorldBenchmark:
         self.llm_provider = llm_provider
         self.llm_model = llm_model
         self.temperature = temperature
+        self.reasoning = reasoning
         self.adb_path = adb_path
         self.console_port = console_port
         self.perform_emulator_setup = perform_emulator_setup
@@ -237,6 +239,7 @@ class AndroidWorldBenchmark:
                 temperature=self.temperature,
                 max_steps=self.max_steps_per_task,
                 debug=True,
+                reasoning=self.reasoning,
             )
 
             # Store tools instance for screenshots
@@ -403,6 +406,9 @@ async def main():
     llm_group.add_argument(
         "--temperature", type=float, default=0.2, help="Temperature for LLM sampling"
     )
+    llm_group.add_argument(
+        "--reasoning", type=bool, default=False, help="Enable reasoning for LLM"
+    )
 
     # Environment configuration
     env_group = parser.add_argument_group("Environment Configuration")
@@ -483,6 +489,7 @@ async def main():
         progress_file=args.progress_file,
         use_keepalive=not args.no_keepalive,
         keepalive_interval=args.keepalive_interval,
+        reasoning=args.reasoning,
     )
 
     # Just list tasks if requested

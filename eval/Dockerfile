@@ -114,4 +114,6 @@ RUN chmod a+x start_emu_headless.sh && \
 
 RUN ./download-apk.sh
 
+VOLUME ["/opt/shared/droidrun/eval_results", "/opt/shared/droidrun/trajectories"]
+
 ENTRYPOINT [ "./entrypoint.sh" ]

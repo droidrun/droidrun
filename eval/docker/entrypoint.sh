@@ -6,4 +6,4 @@
 adb root && \
 droidrun setup --path /opt/shared/droidrun-portal.apk && \
 cd /opt/shared/droidrun && \
-python -m eval.android_world_bench --task-ids "$@" --perform-emulator-setup
+python -m eval.android_world_bench --perform-emulator-setup "$@"
