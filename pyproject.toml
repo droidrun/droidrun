@@ -21,7 +21,8 @@ dependencies = [
     "llama-index-llms-gemini",
     "llama-index-llms-deepseek",
     "llama-index-llms-anthropic",
-    "llama-index-llms-ollama"
+    "llama-index-llms-ollama",
+    "llama-index-llms-openai-like>=0.4.0",
 ]
 requires-python = ">=3.10"
 readme = "README.md"

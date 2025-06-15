@@ -120,7 +120,7 @@ def update_layout(layout, log_list, step_message, current_time, goal=None, compl
     ))
 
 @coro
-async def run_command(command: str, device: str | None, provider: str, model: str, steps: int, base_url: str, reasoning: bool, tracing: bool, debug: bool, save_trajectory: bool = False, trajectory_dir: str = None, **kwargs):
+async def run_command(command: str, device: str | None, provider: str, model: str, steps: int, api_base: str, reasoning: bool, tracing: bool, debug: bool, save_trajectory: bool = False, trajectory_dir: str = None, **kwargs):
     """Run a command on your Android device using natural language."""
     original_stderr = sys.stderr
     
@@ -198,7 +198,7 @@ async def run_command(command: str, device: str | None, provider: str, model: st
                 current_step = "Initializing LLM..."
                 event_handler.current_step = current_step
                 update_display()
-                llm = load_llm(provider_name=provider, model=model, base_url=base_url, **kwargs)
+                llm = load_llm(provider_name=provider, model=model, api_base=api_base, **kwargs)
                 logs.append(f"🧠 LLM ready: {provider}/{model}")
 
                 # Agent setup
@@ -325,16 +325,16 @@ def cli():
 @click.option('--model', '-m', help='LLM model name', default="models/gemini-2.5-pro-preview-05-06")
 @click.option('--temperature', type=float, help='Temperature for LLM', default=0.2)
 @click.option('--steps', type=int, help='Maximum number of steps', default=15)
-@click.option('--base_url', '-u', help='Base URL for API (e.g., OpenRouter or Ollama)', default=None)
+@click.option('--api_base', '-u', help='Base URL for API (e.g., OpenRouter or Ollama)', default=None)
 @click.option('--reasoning/--no-reasoning', is_flag=True, help='Enable/disable planning with reasoning', default=False)
 @click.option('--tracing', is_flag=True, help='Enable Arize Phoenix tracing', default=False)
 @click.option('--debug', is_flag=True, help='Enable verbose debug logging', default=False)
 @click.option('--save-trajectory', is_flag=True, help='Save agent trajectory to file', default=False)
 @click.option('--trajectory-dir', help='Directory to save trajectory (default: "trajectories")', default="trajectories")
-def run(command: str, device: str | None, provider: str, model: str, steps: int, base_url: str, temperature: float, reasoning: bool, tracing: bool, debug: bool, save_trajectory: bool, trajectory_dir: str):
+def run(command: str, device: str | None, provider: str, model: str, steps: int, api_base: str, temperature: float, reasoning: bool, tracing: bool, debug: bool, save_trajectory: bool, trajectory_dir: str):
     """Run a command on your Android device using natural language."""
     # Call our standalone function
-    return run_command(command, device, provider, model, steps, base_url, reasoning, tracing, debug, temperature=temperature, save_trajectory=save_trajectory, trajectory_dir=trajectory_dir)
+    return run_command(command, device, provider, model, steps, api_base, reasoning, tracing, debug, temperature=temperature, save_trajectory=save_trajectory, trajectory_dir=trajectory_dir)
 
 @cli.command()
 @coro
@@ -459,4 +459,4 @@ if __name__ == "__main__":
     tracing = True
     debug = True
     base_url = None
-    run_command(command=command, device=device, provider=provider, model=model, steps=steps, temperature=temperature, reasoning=reasoning, tracing=tracing, debug=debug, base_url=base_url, api_key=api_key)
+    run_command(command=command, device=device, provider=provider, model=model, steps=steps, temperature=temperature, reasoning=reasoning, tracing=tracing, debug=debug, api_base=base_url, api_key=api_key)
