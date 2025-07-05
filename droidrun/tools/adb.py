@@ -7,7 +7,7 @@ import json
 import time
 import asyncio
 import logging
-from typing import Optional, Dict, Tuple, List, Any, Type, Self
+from typing_extensions import Optional, Dict, Tuple, List, Any, Type, Self
 from droidrun.adb.device import Device
 from droidrun.adb.manager import DeviceManager
 from droidrun.tools.tools import Tools
