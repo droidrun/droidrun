@@ -169,7 +169,7 @@ class CodeActAgent(Workflow):
                     "[yellow]DeepSeek doesnt support images. Disabling screenshots[/]"
                 )
             elif self.vision == True and context == "screenshot":
-                screenshot = (await self.tools.take_screenshot())[1]
+                screenshot = (self.tools.take_screenshot())[1]
                 ctx.write_event_to_stream(ScreenshotEvent(screenshot=screenshot))
 
                 await ctx.set("screenshot", screenshot)
@@ -177,7 +177,7 @@ class CodeActAgent(Workflow):
 
             if context == "ui_state":
                 try:
-                    state = await self.tools.get_state()
+                    state = self.tools.get_state()
                     await ctx.set("ui_state", state["a11y_tree"])
                     chat_history = await chat_utils.add_ui_text_block(
                         state["a11y_tree"], chat_history
@@ -189,7 +189,7 @@ class CodeActAgent(Workflow):
 
             if context == "packages":
                 chat_history = await chat_utils.add_packages_block(
-                    await self.tools.list_packages(include_system_apps=True),
+                    self.tools.list_packages(include_system_apps=True),
                     chat_history,
                 )
 
@@ -398,13 +398,13 @@ class CodeActAgent(Workflow):
             ui_state = None
             
             try:
-                _, screenshot_bytes = await self.tools.take_screenshot()
+                _, screenshot_bytes = self.tools.take_screenshot()
                 screenshot = screenshot_bytes
             except Exception as e:
                 logger.warning(f"Failed to capture final screenshot: {e}")
             
             try:
-                (a11y_tree, phone_state) = await self.tools.get_state()
+                (a11y_tree, phone_state) = self.tools.get_state()
             except Exception as e:
                 logger.warning(f"Failed to capture final UI state: {e}")
             

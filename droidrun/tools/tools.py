@@ -14,14 +14,14 @@ class Tools(ABC):
     """
 
     @abstractmethod
-    async def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> Dict[str, Any]:
         """
         Get the current state of the tool.
         """
         pass
 
     @abstractmethod
-    async def tap_by_index(self, index: int) -> bool:
+    def tap_by_index(self, index: int) -> bool:
         """
         Tap the element at the given index.
         """
@@ -32,7 +32,7 @@ class Tools(ABC):
     #    pass
 
     @abstractmethod
-    async def swipe(
+    def swipe(
         self, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int = 300
     ) -> bool:
         """
@@ -41,56 +41,56 @@ class Tools(ABC):
         pass
 
     @abstractmethod
-    async def input_text(self, text: str) -> bool:
+    def input_text(self, text: str) -> bool:
         """
         Input the given text into a focused input field.
         """
         pass
 
     @abstractmethod
-    async def back(self) -> bool:
+    def back(self) -> bool:
         """
         Press the back button.
         """
         pass
 
     @abstractmethod
-    async def press_key(self, keycode: int) -> bool:
+    def press_key(self, keycode: int) -> bool:
         """
         Enter the given keycode.
         """
         pass
 
     @abstractmethod
-    async def start_app(self, package: str, activity: str = "") -> bool:
+    def start_app(self, package: str, activity: str = "") -> bool:
         """
         Start the given app.
         """
         pass
 
     @abstractmethod
-    async def take_screenshot(self) -> Tuple[str, bytes]:
+    def take_screenshot(self) -> Tuple[str, bytes]:
         """
         Take a screenshot of the device.
         """
         pass
 
     @abstractmethod
-    async def list_packages(self, include_system_apps: bool = False) -> List[str]:
+    def list_packages(self, include_system_apps: bool = False) -> List[str]:
         """
         List all packages on the device.
         """
         pass
 
     @abstractmethod
-    async def remember(self, information: str) -> str:
+    def remember(self, information: str) -> str:
         """
         Remember the given information. This is used to store information in the tool's memory.
         """
         pass
 
     @abstractmethod
-    async def get_memory(self) -> List[str]:
+    def get_memory(self) -> List[str]:
         """
         Get the memory of the tool.
         """

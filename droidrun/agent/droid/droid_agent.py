@@ -87,6 +87,7 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
             debug: Whether to enable verbose debug logging
             **kwargs: Additional keyword arguments to pass to the agents
         """
+        self.user_id = kwargs.pop("user_id", None)
         super().__init__(timeout=timeout ,*args,**kwargs)
         # Configure default logging if not already configured
         self._configure_default_logging(debug=debug)
@@ -162,7 +163,8 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
                 enable_tracing=enable_tracing,
                 debug=debug,
                 save_trajectories=save_trajectories,
-            )
+            ),
+            self.user_id
         )
 
         
@@ -369,7 +371,8 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
                 success=ev.success,
                 output=ev.output,
                 steps=ev.steps,
-            )
+            ),
+            self.user_id
         )
         flush()
 

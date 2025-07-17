@@ -54,7 +54,7 @@ def get_user_id() -> str:
         return "unknown"
 
 
-def capture(event: TelemetryEvent):
+def capture(event: TelemetryEvent, user_id: str | None = None):
     try:
         if not is_telemetry_enabled():
             logger.debug(f"Telemetry disabled, skipping capture of {event}")
@@ -66,7 +66,7 @@ def capture(event: TelemetryEvent):
             **event_data,
         }
 
-        posthog.capture(event_name, distinct_id=get_user_id(), properties=properties)
+        posthog.capture(event_name, distinct_id=user_id or get_user_id(), properties=properties)
         logger.debug(f"Captured event: {event_name} with properties: {event}")
     except Exception as e:
         logger.error(f"Error capturing event: {e}")

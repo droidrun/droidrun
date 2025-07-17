@@ -131,12 +131,12 @@ class PlannerAgent(Workflow):
         logger.info(f"🧠 Thinking about how to plan the goal...")
 
         if self.vision:
-            screenshot = (await self.tools_instance.take_screenshot())[1]
+            screenshot = (self.tools_instance.take_screenshot())[1]
             ctx.write_event_to_stream(ScreenshotEvent(screenshot=screenshot))
             await ctx.set("screenshot", screenshot)
 
         try:
-            state = await self.tools_instance.get_state()
+            state = self.tools_instance.get_state()
             await ctx.set("ui_state", state["a11y_tree"])
             await ctx.set("phone_state", state["phone_state"])
         except Exception as e:
