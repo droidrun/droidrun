@@ -21,7 +21,7 @@ class Tools(ABC):
         pass
 
     @abstractmethod
-    def tap_by_index(self, index: int) -> bool:
+    def tap_by_index(self, index: int) -> str:
         """
         Tap the element at the given index.
         """
@@ -50,28 +50,28 @@ class Tools(ABC):
         pass
 
     @abstractmethod
-    def input_text(self, text: str) -> bool:
+    def input_text(self, text: str) -> str:
         """
         Input the given text into a focused input field.
         """
         pass
 
     @abstractmethod
-    def back(self) -> bool:
+    def back(self) -> str:
         """
         Press the back button.
         """
         pass
 
     @abstractmethod
-    def press_key(self, keycode: int) -> bool:
+    def press_key(self, keycode: int) -> str:
         """
         Enter the given keycode.
         """
         pass
 
     @abstractmethod
-    def start_app(self, package: str, activity: str = "") -> bool:
+    def start_app(self, package: str, activity: str = "") -> str:
         """
         Start the given app.
         """
@@ -106,7 +106,7 @@ class Tools(ABC):
         pass
 
     @abstractmethod
-    def complete(self, success: bool, reason: str = "") -> bool:
+    def complete(self, success: bool, reason: str = "") -> None:
         """
         Complete the tool. This is used to indicate that the tool has completed its task.
         """

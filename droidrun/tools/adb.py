@@ -7,6 +7,8 @@ import io
 import json
 import time
 import logging
+import requests
+import base64
 from typing_extensions import Optional, Dict, Tuple, List, Any, Type, Self
 from droidrun.tools.tools import Tools
 from adbutils import adb
@@ -17,13 +19,20 @@ logger = logging.getLogger("droidrun-tools")
 class AdbTools(Tools):
     """Core UI interaction tools for Android device control."""
 
-    def __init__(self, serial: str | None = None) -> None:
+    def __init__(self, serial: str | None = None, use_tcp: bool = True, tcp_port: int = 8080) -> None:
         """Initialize the AdbTools instance.
 
         Args:
             serial: Device serial number
+            use_tcp: Whether to use TCP communication (default: True)
+            tcp_port: TCP port for communication (default: 8080)
         """
         self.device = adb.device(serial=serial)
+        self.use_tcp = use_tcp
+        self.tcp_port = tcp_port
+        self.tcp_base_url = f"http://localhost:{tcp_port}"
+        self.tcp_forwarded = False
+        
         # Instance‐level cache for clickable elements (index-based tapping)
         self.clickable_elements_cache: List[Dict[str, Any]] = []
         self.last_screenshot = None
@@ -34,6 +43,66 @@ class AdbTools(Tools):
         self.memory: List[str] = []
         # Store all screenshots with timestamps
         self.screenshots: List[Dict[str, Any]] = []
+        
+        # Set up TCP forwarding if requested
+        if self.use_tcp:
+            self.setup_tcp_forward()
+
+    def setup_tcp_forward(self) -> bool:
+        """
+        Set up ADB TCP port forwarding for communication with the portal app.
+        
+        Returns:
+            bool: True if forwarding was set up successfully, False otherwise
+        """
+        try:
+            logger.debug(f"Setting up TCP port forwarding: tcp:{self.tcp_port} tcp:{self.tcp_port}")
+            # Use adb forward command to set up port forwarding
+            result = self.device.forward(f"tcp:{self.tcp_port}", f"tcp:{self.tcp_port}")
+            self.tcp_forwarded = True
+            logger.debug(f"TCP port forwarding set up successfully: {result}")
+            
+            # Test the connection with a ping
+            try:
+                response = requests.get(f"{self.tcp_base_url}/ping", timeout=5)
+                if response.status_code == 200:
+                    logger.debug("TCP connection test successful")
+                    return True
+                else:
+                    logger.warning(f"TCP connection test failed with status: {response.status_code}")
+                    return False
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"TCP connection test failed: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to set up TCP port forwarding: {e}")
+            self.tcp_forwarded = False
+            return False
+
+    def teardown_tcp_forward(self) -> bool:
+        """
+        Remove ADB TCP port forwarding.
+        
+        Returns:
+            bool: True if forwarding was removed successfully, False otherwise
+        """
+        try:
+            if self.tcp_forwarded:
+                logger.debug(f"Removing TCP port forwarding for port {self.tcp_port}")
+                result = self.device.forward_remove(f"tcp:{self.tcp_port}")
+                self.tcp_forwarded = False
+                logger.debug(f"TCP port forwarding removed: {result}")
+                return True
+            return True
+        except Exception as e:
+            logger.error(f"Failed to remove TCP port forwarding: {e}")
+            return False
+
+    def __del__(self):
+        """Cleanup when the object is destroyed."""
+        if hasattr(self, 'tcp_forwarded') and self.tcp_forwarded:
+            self.teardown_tcp_forward()
 
     def _parse_content_provider_output(
         self, raw_output: str
@@ -293,38 +362,64 @@ class AdbTools(Tools):
         """
         try:
             logger.debug(f"Inputting text: {text}")
-            # Save the current keyboard
-            original_ime = self.device.shell("settings get secure default_input_method")
-            original_ime = original_ime.strip()
+            
+            if self.use_tcp and self.tcp_forwarded:
+                # Use TCP communication
+                encoded_text = base64.b64encode(text.encode()).decode()
+                
+                payload = {"base64_text": encoded_text}
+                response = requests.post(
+                    f"{self.tcp_base_url}/keyboard/input",
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=10
+                )
+                
+                logger.debug(f"Keyboard input TCP response: {response.status_code}, {response.text}")
+                
+                if response.status_code == 200:
+                    logger.debug(
+                        f"Text input completed via TCP: {text[:50]}{'...' if len(text) > 50 else ''}"
+                    )
+                    return f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
+                else:
+                    return f"Error: HTTP request failed with status {response.status_code}: {response.text}"
+                    
+            else:
+                # Fallback to content provider method
+                # Save the current keyboard
+                original_ime = self.device.shell("settings get secure default_input_method")
+                original_ime = original_ime.strip()
 
-            # Enable the Droidrun keyboard
-            self.device.shell("ime enable com.droidrun.portal/.DroidrunKeyboardIME")
+                # Enable the Droidrun keyboard
+                self.device.shell("ime enable com.droidrun.portal/.DroidrunKeyboardIME")
 
-            # Set the Droidrun keyboard as the default
-            self.device.shell("ime set com.droidrun.portal/.DroidrunKeyboardIME")
+                # Set the Droidrun keyboard as the default
+                self.device.shell("ime set com.droidrun.portal/.DroidrunKeyboardIME")
 
-            # Wait for keyboard to change
-            time.sleep(1)
+                # Wait for keyboard to change
+                time.sleep(1)
 
-            # Encode the text to Base64
-            import base64
+                # Encode the text to Base64
+                encoded_text = base64.b64encode(text.encode()).decode()
 
-            encoded_text = base64.b64encode(text.encode()).decode()
+                cmd = f'content insert --uri "content://com.droidrun.portal/keyboard/input" --bind base64_text:s:"{encoded_text}"'
+                self.device.shell(cmd)
 
-            cmd = f'content insert --uri "content://com.droidrun.portal/keyboard/input" --bind base64_text:s:"{encoded_text}"'
-            self.device.shell(cmd)
+                # Wait for text input to complete
+                time.sleep(0.5)
 
-            # Wait for text input to complete
-            time.sleep(0.5)
+                # Restore the original keyboard
+                if original_ime and "com.droidrun.portal" not in original_ime:
+                    self.device.shell(f"ime set {original_ime}")
 
-            # Restore the original keyboard
-            if original_ime and "com.droidrun.portal" not in original_ime:
-                self.device.shell(f"ime set {original_ime}")
-
-            logger.debug(
-                f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
-            )
-            return f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
+                logger.debug(
+                    f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
+                )
+                return f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
+                
+        except requests.exceptions.RequestException as e:
+            return f"Error: TCP request failed: {str(e)}"
         except ValueError as e:
             return f"Error: {str(e)}"
         except Exception as e:
@@ -534,32 +629,60 @@ class AdbTools(Tools):
 
         try:
             logger.debug("Getting state")
-            adb_output = self.device.shell(
-                "content query --uri content://com.droidrun.portal/state",
-            )
-
-            state_data = self._parse_content_provider_output(adb_output)
-
-            if state_data is None:
-                return {
-                    "error": "Parse Error",
-                    "message": "Failed to parse state data from ContentProvider response",
-                }
-
-            if isinstance(state_data, dict) and "data" in state_data:
-                data_str = state_data["data"]
-                try:
-                    combined_data = json.loads(data_str)
-                except json.JSONDecodeError:
+            
+            if self.use_tcp and self.tcp_forwarded:
+                # Use TCP communication
+                response = requests.get(f"{self.tcp_base_url}/state", timeout=10)
+                
+                if response.status_code == 200:
+                    tcp_response = response.json()
+                    
+                    # Check if response has the expected format
+                    if isinstance(tcp_response, dict) and "data" in tcp_response:
+                        data_str = tcp_response["data"]
+                        try:
+                            combined_data = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            return {
+                                "error": "Parse Error",
+                                "message": "Failed to parse JSON data from TCP response data field",
+                            }
+                    else:
+                        # Fallback: assume direct JSON format
+                        combined_data = tcp_response
+                else:
                     return {
-                        "error": "Parse Error",
-                        "message": "Failed to parse JSON data from ContentProvider data field",
+                        "error": "HTTP Error",
+                        "message": f"HTTP request failed with status {response.status_code}",
                     }
             else:
-                return {
-                    "error": "Format Error",
-                    "message": f"Unexpected state data format: {type(state_data)}",
-                }
+                # Fallback to content provider method
+                adb_output = self.device.shell(
+                    "content query --uri content://com.droidrun.portal/state",
+                )
+
+                state_data = self._parse_content_provider_output(adb_output)
+
+                if state_data is None:
+                    return {
+                        "error": "Parse Error",
+                        "message": "Failed to parse state data from ContentProvider response",
+                    }
+
+                if isinstance(state_data, dict) and "data" in state_data:
+                    data_str = state_data["data"]
+                    try:
+                        combined_data = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        return {
+                            "error": "Parse Error",
+                            "message": "Failed to parse JSON data from ContentProvider data field",
+                        }
+                else:
+                    return {
+                        "error": "Format Error",
+                        "message": f"Unexpected state data format: {type(state_data)}",
+                    }
 
             # Validate that both a11y_tree and phone_state are present
             if "a11y_tree" not in combined_data:
@@ -597,10 +720,163 @@ class AdbTools(Tools):
                 "phone_state": combined_data["phone_state"],
             }
 
+        except requests.exceptions.RequestException as e:
+            return {
+                "error": "TCP Error",
+                "message": f"TCP request failed: {str(e)}",
+            }
         except Exception as e:
             return {
                 "error": str(e),
                 "message": f"Error getting combined state: {str(e)}",
+            }
+
+    def get_a11y_tree(self) -> Dict[str, Any]:
+        """
+        Get just the accessibility tree using the /a11y_tree endpoint.
+
+        Returns:
+            Dictionary containing accessibility tree data
+        """
+        try:
+            if self.use_tcp and self.tcp_forwarded:
+                response = requests.get(f"{self.tcp_base_url}/a11y_tree", timeout=10)
+                
+                if response.status_code == 200:
+                    tcp_response = response.json()
+                    
+                    # Check if response has the expected format with data field
+                    if isinstance(tcp_response, dict) and "data" in tcp_response:
+                        data_str = tcp_response["data"]
+                        try:
+                            return json.loads(data_str)
+                        except json.JSONDecodeError:
+                            return {
+                                "error": "Parse Error",
+                                "message": "Failed to parse JSON data from TCP response data field",
+                            }
+                    else:
+                        # Fallback: assume direct JSON format
+                        return tcp_response
+                else:
+                    return {
+                        "error": "HTTP Error",
+                        "message": f"HTTP request failed with status {response.status_code}",
+                    }
+            else:
+                # Fallback: use get_state and extract a11y_tree
+                state = self.get_state()
+                if "error" in state:
+                    return state
+                return {"a11y_tree": state.get("a11y_tree", [])}
+                
+        except requests.exceptions.RequestException as e:
+            return {
+                "error": "TCP Error",
+                "message": f"TCP request failed: {str(e)}",
+            }
+        except Exception as e:
+            return {
+                "error": str(e),
+                "message": f"Error getting a11y tree: {str(e)}",
+            }
+
+    def get_phone_state(self) -> Dict[str, Any]:
+        """
+        Get just the phone state using the /phone_state endpoint.
+
+        Returns:
+            Dictionary containing phone state data
+        """
+        try:
+            if self.use_tcp and self.tcp_forwarded:
+                response = requests.get(f"{self.tcp_base_url}/phone_state", timeout=10)
+                
+                if response.status_code == 200:
+                    tcp_response = response.json()
+                    
+                    # Check if response has the expected format with data field
+                    if isinstance(tcp_response, dict) and "data" in tcp_response:
+                        data_str = tcp_response["data"]
+                        try:
+                            return json.loads(data_str)
+                        except json.JSONDecodeError:
+                            return {
+                                "error": "Parse Error",
+                                "message": "Failed to parse JSON data from TCP response data field",
+                            }
+                    else:
+                        # Fallback: assume direct JSON format
+                        return tcp_response
+                else:
+                    return {
+                        "error": "HTTP Error",
+                        "message": f"HTTP request failed with status {response.status_code}",
+                    }
+            else:
+                # Fallback: use get_state and extract phone_state
+                state = self.get_state()
+                if "error" in state:
+                    return state
+                return {"phone_state": state.get("phone_state", {})}
+                
+        except requests.exceptions.RequestException as e:
+            return {
+                "error": "TCP Error",
+                "message": f"TCP request failed: {str(e)}",
+            }
+        except Exception as e:
+            return {
+                "error": str(e),
+                "message": f"Error getting phone state: {str(e)}",
+            }
+
+    def ping(self) -> Dict[str, Any]:
+        """
+        Test the TCP connection using the /ping endpoint.
+
+        Returns:
+            Dictionary with ping result
+        """
+        try:
+            if self.use_tcp and self.tcp_forwarded:
+                response = requests.get(f"{self.tcp_base_url}/ping", timeout=5)
+                
+                if response.status_code == 200:
+                    try:
+                        tcp_response = response.json() if response.content else {}
+                        logger.debug(f"Ping TCP response: {tcp_response}")
+                        return {
+                            "status": "success",
+                            "message": "Ping successful",
+                            "response": tcp_response
+                        }
+                    except json.JSONDecodeError:
+                        return {
+                            "status": "success",
+                            "message": "Ping successful (non-JSON response)",
+                            "response": response.text
+                        }
+                else:
+                    return {
+                        "status": "error",
+                        "message": f"Ping failed with status {response.status_code}: {response.text}",
+                    }
+            else:
+                return {
+                    "status": "error",
+                    "message": "TCP communication is not enabled",
+                }
+                
+        except requests.exceptions.RequestException as e:
+            return {
+                "status": "error",
+                "message": f"Ping failed: {str(e)}",
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error during ping: {str(e)}",
             }
 
 
