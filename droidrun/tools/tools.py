@@ -32,12 +32,13 @@ class Tools(ABC):
                 
                 step_screenshots = caller_globals.get('step_screenshots')
                 step_ui_states = caller_globals.get('step_ui_states')
+                step_actions = caller_globals.get('step_actions')
                 
                 if step_screenshots is not None:
                     step_screenshots.append(self.take_screenshot()[1])
                 if step_ui_states is not None:
                     step_ui_states.append(self.get_state())
-            
+                step_actions.append({"action": func.__name__, "args": args[1:], "kwargs": kwargs})
             return result
         return wrapper
 

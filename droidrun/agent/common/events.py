@@ -45,3 +45,6 @@ class StartAppEvent(MacroEvent):
     """"Event for starting an app"""
     package: str
     activity: str = None
+
+class RecordUIStateEvent(Event):
+    ui_state: dict

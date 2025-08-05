@@ -101,6 +101,7 @@ class SimpleCodeExecutor:
         self.globals['ui_state'] = await ctx.get("ui_state", None)
         self.globals['step_screenshots'] = []
         self.globals['step_ui_states'] = []
+        self.globals['step_actions'] = []
         
         if self.tools_instance and isinstance(self.tools_instance, AdbTools):
             self.tools_instance._set_context(ctx)
@@ -143,6 +144,7 @@ class SimpleCodeExecutor:
         result = {
             'output': output,
             'screenshots': self.globals['step_screenshots'],
-            'ui_states': self.globals['step_ui_states']
+            'ui_states': self.globals['step_ui_states'],
+            'actions': self.globals['step_actions']
         }
         return result

@@ -6,7 +6,7 @@ from rich.console import Console
 from rich.live import Live
 from typing import List
 
-from droidrun.agent.common.events import ScreenshotEvent
+from droidrun.agent.common.events import ScreenshotEvent, RecordActionEvent, RecordUIStateEvent
 from droidrun.agent.planner.events import (
     PlanInputEvent,
     PlanThinkingEvent,
@@ -176,6 +176,12 @@ class LogHandler(logging.Handler):
         # Log different event types with proper names
         if isinstance(event, ScreenshotEvent):
             logger.debug("📸 Taking screenshot...")
+        
+        elif isinstance(event, RecordActionEvent):
+            logger.debug(f"✏️ Recording action: {event.action}")
+
+        elif isinstance(event, RecordUIStateEvent):
+            logger.debug(f"✏️ Recording UI state")
 
         # Planner events
         elif isinstance(event, PlanInputEvent):
