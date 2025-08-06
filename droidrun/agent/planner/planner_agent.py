@@ -179,7 +179,7 @@ class PlannerAgent(Workflow):
                 for action in actions:
                     ctx.write_event_to_stream(RecordActionEvent(action=action['action'], args=action['args'], kwargs=action['kwargs']))
                 ui_states = result['ui_states']
-                for ui_state in ui_states:
+                for ui_state in ui_states[:-1]:
                     ctx.write_event_to_stream(RecordUIStateEvent(ui_state=ui_state['a11y_tree']))
 
                 await self.chat_memory.aput(

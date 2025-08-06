@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from typing import Dict, List, Any
 from PIL import Image
 import io
@@ -26,6 +27,7 @@ class Trajectory:
         """
         self.events: List[Event] = [] 
         self.screenshots: List[bytes] = [] 
+<<<<<<< HEAD
         self.macro: List[Event] = []
         self.goal = goal or "DroidRun automation sequence"
 
@@ -37,6 +39,10 @@ class Trajectory:
         """
         self.goal = goal
 
+=======
+        self.actions: List[Dict[str, Any]] = []
+        self.ui_states: List[Dict[str, Any]] = []
+>>>>>>> 5b5fde0 (save UI states)
 
     def create_screenshot_gif(self, output_path: str, duration: int = 1000) -> str:
         """
@@ -60,7 +66,7 @@ class Trajectory:
             images.append(img)
         
         # Save as GIF
-        gif_path = f"{output_path}.gif"
+        gif_path = os.path.join(output_path, "trajectory.gif")
         images[0].save(
             gif_path,
             save_all=True,
@@ -86,11 +92,16 @@ class Trajectory:
         Returns:
             Path to the trajectory folder
         """
-        os.makedirs(directory, exist_ok=True)
-        
+        # timestamp may be the same for multiple processes, using uuid to ensure uniqueness
         timestamp = time.strftime("%Y%m%d_%H%M%S")
+<<<<<<< HEAD
         trajectory_folder = os.path.join(directory, f"trajectory_{timestamp}")
         os.makedirs(trajectory_folder, exist_ok=True)
+=======
+        unique_id = str(uuid.uuid4())[:8]
+        base_path = os.path.join(directory, f"{timestamp}_{unique_id}")
+        os.makedirs(base_path, exist_ok=True)
+>>>>>>> 5b5fde0 (save UI states)
         
         def make_serializable(obj):
             """Recursively make objects JSON serializable."""
@@ -128,6 +139,7 @@ class Trajectory:
             }
             serializable_events.append(event_dict)
         
+<<<<<<< HEAD
         trajectory_json_path = os.path.join(trajectory_folder, "trajectory.json")
         with open(trajectory_json_path, "w") as f:
             json.dump(serializable_events, f, indent=2)
@@ -154,12 +166,37 @@ class Trajectory:
                 }, f, indent=2)
             
             logger.info(f"💾 Saved macro sequence with {len(macro_data)} actions to {macro_json_path}")
+=======
+        events_path = os.path.join(base_path, "events.json")
+        with open(events_path, "w") as f:
+            json.dump(serializable_events, f, ensure_ascii=False, indent=2)
+
+        actions_path = os.path.join(base_path, "actions.json")
+        with open(actions_path, "w") as f:
+            json.dump(self.actions, f, ensure_ascii=False, indent=2)
+
+        if len(self.ui_states) != len(self.screenshots):
+            logger.warning("UI states and screenshots are not the same length!")
+        
+        os.makedirs(os.path.join(base_path, "ui_states"), exist_ok=True)
+        for idx, ui_state in enumerate(self.ui_states):
+            ui_states_path = os.path.join(base_path, "ui_states", f"{idx}.json")
+            with open(ui_states_path, "w", encoding="utf-8") as f:
+                json.dump(ui_state, f, ensure_ascii=False, indent=2)
+                
+        os.makedirs(os.path.join(base_path, "screenshots"), exist_ok=True)
+        for idx, screenshot in enumerate(self.screenshots):
+            screenshot_path = os.path.join(base_path, "screenshots", f"{idx}.png")
+            with open(screenshot_path, "wb") as f:
+                f.write(screenshot)
+>>>>>>> 5b5fde0 (save UI states)
 
         # Create screenshot GIF
         gif_path = self.create_screenshot_gif(os.path.join(trajectory_folder, "screenshots"))
         if gif_path:
             logger.info(f"🎬 Saved screenshot GIF to {gif_path}")
 
+<<<<<<< HEAD
         logger.info(f"📁 Trajectory saved to folder: {trajectory_folder}")
         return trajectory_folder
 
@@ -331,6 +368,9 @@ class Trajectory:
             print(f"Total events: {len(folder_data['trajectory_data'])}")
         
         print("=================================")
+=======
+        return base_path
+>>>>>>> 5b5fde0 (save UI states)
 
     def get_trajectory_statistics(trajectory_data: Dict[str, Any]) -> Dict[str, Any]:
         """

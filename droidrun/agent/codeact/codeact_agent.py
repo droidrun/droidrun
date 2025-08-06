@@ -257,7 +257,7 @@ class CodeActAgent(Workflow):
                 ctx.write_event_to_stream(ScreenshotEvent(screenshot=screenshot))
 
             ui_states = result['ui_states']
-            for ui_state in ui_states:
+            for ui_state in ui_states[:-1]:
                 ctx.write_event_to_stream(RecordUIStateEvent(ui_state=ui_state['a11y_tree']))
 
             actions = result['actions']
