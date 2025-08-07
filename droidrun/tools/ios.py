@@ -4,10 +4,9 @@ UI Actions - Core UI interaction tools for iOS device control.
 
 import re
 import time
-import asyncio
 from typing import Optional, Dict, Tuple, List, Any
 import logging
-import aiohttp
+import requests
 from droidrun.tools.tools import Tools
 
 logger = logging.getLogger("IOS")
@@ -59,43 +58,39 @@ class IOSTools(Tools):
         self.bundle_identifiers = bundle_identifiers
         logger.info(f"iOS device URL: {url}")
 
-    async def get_state(
-        self, serial: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    def get_state(self) -> List[Dict[str, Any]]:
         """
         Get all clickable UI elements from the iOS device using accessibility API.
-
-        Args:
-            serial: Optional device URL (not used for iOS, uses instance URL)
 
         Returns:
             List of dictionaries containing UI elements extracted from the device screen
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                a11y_url = f"{self.url}/vision/a11y"
-                async with session.get(a11y_url) as response:
-                    if response.status == 200:
-                        a11y_data = await response.json()
+            a11y_url = f"{self.url}/vision/a11y"
+            response = requests.get(a11y_url)
 
-                        # Parse the iOS accessibility tree format
-                        elements = self._parse_ios_accessibility_tree(
-                            a11y_data["accessibilityTree"]
-                        )
+            if response.status_code == 200:
+                a11y_data = response.json()
 
-                        # Cache the elements for tap_by_index usage
-                        self.clickable_elements_cache = elements
+                # Parse the iOS accessibility tree format
+                elements = self._parse_ios_accessibility_tree(
+                    a11y_data["accessibilityTree"]
+                )
 
-                        return {
-                            "a11y_tree":self.clickable_elements_cache
-                        }
-                    else:
-                        logger.error(
-                            f"Failed to get accessibility data: HTTP {response.status}"
-                        )
-                        raise ValueError(
-                            f"Failed to get accessibility data: HTTP {response.status}"
-                        )
+                # Cache the elements for tap_by_index usage
+                self.clickable_elements_cache = elements
+
+                return {
+                    "a11y_tree": self.clickable_elements_cache,
+                    "phone_state": self._get_phone_state(),
+                }
+            else:
+                logger.error(
+                    f"Failed to get accessibility data: HTTP {response.status_code}"
+                )
+                raise ValueError(
+                    f"Failed to get accessibility data: HTTP {response.status_code}"
+                )
 
         except Exception as e:
             logger.error(f"Error getting clickable elements: {e}")
@@ -208,7 +203,7 @@ class IOSTools(Tools):
 
         return elements
 
-    async def tap_by_index(self, index: int, serial: Optional[str] = None) -> str:
+    def tap_by_index(self, index: int) -> str:
         """
         Tap on a UI element by its index.
 
@@ -275,55 +270,51 @@ class IOSTools(Tools):
             self.last_tapped_rect = f"{x},{y},{width},{height}"
 
             # Make the tap request
-            async with aiohttp.ClientSession() as session:
-                tap_url = f"{self.url}/gestures/tap"
-                payload = {"rect": ios_rect, "count": 1, "longPress": False}
+            tap_url = f"{self.url}/gestures/tap"
+            payload = {"rect": ios_rect, "count": 1, "longPress": False}
 
-                logger.info(f"payload {payload}")
+            logger.info(f"payload {payload}")
 
-                async with session.post(tap_url, json=payload) as response:
-                    if response.status == 200:
-                        # Add a small delay to allow UI to update
-                        await asyncio.sleep(0.5)
+            response = requests.post(tap_url, json=payload)
+            if response.status_code == 200:
+                # Add a small delay to allow UI to update
+                time.sleep(0.5)
 
-                        # Create a descriptive response
-                        response_parts = []
-                        response_parts.append(f"Tapped element with index {index}")
-                        response_parts.append(
-                            f"Text: '{element.get('text', 'No text')}'"
-                        )
-                        response_parts.append(
-                            f"Class: {element.get('className', 'Unknown class')}"
-                        )
-                        response_parts.append(f"Rect: {ios_rect}")
+                # Create a descriptive response
+                response_parts = []
+                response_parts.append(f"Tapped element with index {index}")
+                response_parts.append(f"Text: '{element.get('text', 'No text')}'")
+                response_parts.append(
+                    f"Class: {element.get('className', 'Unknown class')}"
+                )
+                response_parts.append(f"Rect: {ios_rect}")
 
-                        return " | ".join(response_parts)
-                    else:
-                        return f"Error: Failed to tap element. HTTP {response.status}"
+                return " | ".join(response_parts)
+            else:
+                return f"Error: Failed to tap element. HTTP {response.status_code}"
 
         except Exception as e:
             return f"Error: {str(e)}"
 
-    """async def tap_by_coordinates(self, x: int, y: int) -> bool:
+    """def tap_by_coordinates(self, x: int, y: int) -> bool:
          # Format rect in iOS format: {{x,y},{w,h}}
         width = 1
         height = 1
         ios_rect = f"{{{{{x},{y}}},{{{width},{height}}}}}"
 
         # Make the tap request
-        async with aiohttp.ClientSession() as session:
-            tap_url = f"{self.url}/gestures/tap"
-            payload = {"rect": ios_rect, "count": 1, "longPress": False}
+        tap_url = f"{self.url}/gestures/tap"
+        payload = {"rect": ios_rect, "count": 1, "longPress": False}
 
-            logger.info(f"payload {payload}")
+        logger.info(f"payload {payload}")
 
-            async with session.post(tap_url, json=payload) as response:
-                if response.status == 200:
-                    return True
-                else:
-                    return False"""
+        response = requests.post(tap_url, json=payload)
+        if response.status_code == 200:
+            return True
+        else:
+            return False"""
 
-    async def tap(self, index: int) -> str:
+    def tap(self, index: int) -> str:
         """
         Tap on a UI element by its index.
 
@@ -336,9 +327,9 @@ class IOSTools(Tools):
         Returns:
             Result message
         """
-        return await self.tap_by_index(index)
+        return self.tap_by_index(index)
 
-    async def swipe(
+    def swipe(
         self, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int = 300
     ) -> bool:
         """
@@ -364,31 +355,47 @@ class IOSTools(Tools):
             else:
                 direction = "down" if dy > 0 else "up"
 
-            async with aiohttp.ClientSession() as session:
-                swipe_url = f"{self.url}/gestures/swipe"
-                payload = {"x": float(start_x), "y": float(start_y), "dir": direction}
+            swipe_url = f"{self.url}/gestures/swipe"
+            payload = {"x": float(start_x), "y": float(start_y), "dir": direction}
 
-                async with session.post(swipe_url, json=payload) as response:
-                    if response.status == 200:
-                        logger.info(
-                            f"Swiped from ({start_x}, {start_y}) to ({end_x}, {end_y}) direction: {direction}"
-                        )
-                        return True
-                    else:
-                        logger.error(f"Failed to swipe: HTTP {response.status}")
-                        return False
+            response = requests.post(swipe_url, json=payload)
+            if response.status_code == 200:
+                logger.info(
+                    f"Swiped from ({start_x}, {start_y}) to ({end_x}, {end_y}) direction: {direction}"
+                )
+                return True
+            else:
+                logger.error(f"Failed to swipe: HTTP {response.status_code}")
+                return False
 
         except Exception as e:
             logger.error(f"Error performing swipe: {e}")
             return False
 
-    async def input_text(self, text: str, serial: Optional[str] = None) -> str:
+    def drag(
+        self, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int = 3000
+    ) -> bool:
+        """
+        Drag from the given start coordinates to the given end coordinates.
+        Args:
+            start_x: Starting X coordinate
+            start_y: Starting Y coordinate
+            end_x: Ending X coordinate
+            end_y: Ending Y coordinate
+            duration_ms: Duration of swipe in milliseconds
+        Returns:
+            Bool indicating success or failure
+        """
+        # TODO: implement this
+        logger.info(f"Drag action FAILED! Not implemented for iOS")
+        return False
+
+    def input_text(self, text: str) -> str:
         """
         Input text on the iOS device.
 
         Args:
             text: Text to input. Can contain spaces, newlines, and special characters including non-ASCII.
-            serial: Optional device serial (not used for iOS, uses instance URL)
 
         Returns:
             Result message
@@ -397,24 +404,23 @@ class IOSTools(Tools):
             # Use the last tapped element's rect if available, otherwise use a default
             rect = self.last_tapped_rect if self.last_tapped_rect else "0,0,100,100"
 
-            async with aiohttp.ClientSession() as session:
-                type_url = f"{self.url}/inputs/type"
-                payload = {"rect": rect, "text": text}
+            type_url = f"{self.url}/inputs/type"
+            payload = {"rect": rect, "text": text}
 
-                async with session.post(type_url, json=payload) as response:
-                    if response.status == 200:
-                        await asyncio.sleep(0.5)  # Wait for text input to complete
-                        return f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
-                    else:
-                        return f"Error: Failed to input text. HTTP {response.status}"
+            response = requests.post(type_url, json=payload)
+            if response.status_code == 200:
+                time.sleep(0.5)  # Wait for text input to complete
+                return f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
+            else:
+                return f"Error: Failed to input text. HTTP {response.status_code}"
 
         except Exception as e:
             return f"Error sending text input: {str(e)}"
 
-    async def back(self) -> str:
+    def back(self) -> str:
         raise NotImplementedError("Back is not yet implemented for iOS")
 
-    async def press_key(self, keycode: int) -> str:
+    def press_key(self, keycode: int) -> str:
         # TODO: refactor this. its not about physical keys but BACK, ENTER, DELETE, etc.
         """
         Press a key on the iOS device.
@@ -431,20 +437,19 @@ class IOSTools(Tools):
             key_names = {0: "HOME", 4: "ACTION", 5: "CAMERA"}
             key_name = key_names.get(keycode, str(keycode))
 
-            async with aiohttp.ClientSession() as session:
-                key_url = f"{self.url}/inputs/key"
-                payload = {"key": keycode}
+            key_url = f"{self.url}/inputs/key"
+            payload = {"key": keycode}
 
-                async with session.post(key_url, json=payload) as response:
-                    if response.status == 200:
-                        return f"Pressed key {key_name}"
-                    else:
-                        return f"Error: Failed to press key. HTTP {response.status}"
+            response = requests.post(key_url, json=payload)
+            if response.status_code == 200:
+                return f"Pressed key {key_name}"
+            else:
+                return f"Error: Failed to press key. HTTP {response.status_code}"
 
         except Exception as e:
             return f"Error pressing key: {str(e)}"
 
-    async def start_app(self, package: str, activity: str = "") -> str:
+    def start_app(self, package: str, activity: str = "") -> str:
         """
         Start an app on the iOS device.
 
@@ -453,97 +458,92 @@ class IOSTools(Tools):
             activity: Optional activity name (not used on iOS)
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                launch_url = f"{self.url}/inputs/launch"
-                payload = {"bundleIdentifier": package}
+            launch_url = f"{self.url}/inputs/launch"
+            payload = {"bundleIdentifier": package}
 
-                async with session.post(launch_url, json=payload) as response:
-                    if response.status == 200:
-                        await asyncio.sleep(1.0)  # Wait for app to launch
-                        return f"Successfully launched app: {package}"
-                    else:
-                        return f"Error: Failed to launch app {package}. HTTP {response.status}"
+            response = requests.post(launch_url, json=payload)
+            if response.status_code == 200:
+                time.sleep(1.0)  # Wait for app to launch
+                return f"Successfully launched app: {package}"
+            else:
+                return f"Error: Failed to launch app {package}. HTTP {response.status_code}"
 
         except Exception as e:
             return f"Error launching app: {str(e)}"
 
-    async def take_screenshot(self) -> Tuple[str, bytes]:
+    def take_screenshot(self) -> Tuple[str, bytes]:
         """
         Take a screenshot of the iOS device.
         This function captures the current screen and adds the screenshot to context in the next message.
         Also stores the screenshot in the screenshots list with timestamp for later GIF creation.
         """
         try:
-            async with aiohttp.ClientSession() as session:
-                screenshot_url = f"{self.url}/vision/screenshot"
-                async with session.get(screenshot_url) as response:
-                    if response.status == 200:
-                        screenshot_data = await response.read()
+            screenshot_url = f"{self.url}/vision/screenshot"
+            response = requests.get(screenshot_url)
 
-                        # Store screenshot with timestamp
-                        screenshot_info = {
-                            "timestamp": time.time(),
-                            "data": screenshot_data,
-                        }
-                        self.screenshots.append(screenshot_info)
-                        self.last_screenshot = screenshot_data
+            if response.status_code == 200:
+                screenshot_data = response.content
 
-                        logger.info(
-                            f"Screenshot captured successfully, size: {len(screenshot_data)} bytes"
-                        )
-                        return ("PNG", screenshot_data)
-                    else:
-                        logger.error(
-                            f"Failed to capture screenshot: HTTP {response.status}"
-                        )
-                        raise ValueError(
-                            f"Failed to capture screenshot: HTTP {response.status}"
-                        )
+                # Store screenshot with timestamp
+                screenshot_info = {
+                    "timestamp": time.time(),
+                    "data": screenshot_data,
+                }
+                self.screenshots.append(screenshot_info)
+                self.last_screenshot = screenshot_data
+
+                logger.info(
+                    f"Screenshot captured successfully, size: {len(screenshot_data)} bytes"
+                )
+                return ("PNG", screenshot_data)
+            else:
+                logger.error(
+                    f"Failed to capture screenshot: HTTP {response.status_code}"
+                )
+                raise ValueError(
+                    f"Failed to capture screenshot: HTTP {response.status_code}"
+                )
 
         except Exception as e:
             logger.error(f"Error capturing screenshot: {e}")
             raise ValueError(f"Error taking screenshot: {str(e)}")
 
-    async def get_phone_state(self, serial: Optional[str] = None) -> Dict[str, Any]:
+    def _get_phone_state(self) -> Dict[str, Any]:
         """
         Get the current phone state including current activity and keyboard visibility.
-
-        Args:
-            serial: Optional device serial number (not used for iOS)
 
         Returns:
             Dictionary with current phone state information
         """
         try:
             # For iOS, we can get some state info from the accessibility API
-            async with aiohttp.ClientSession() as session:
-                a11y_url = f"{self.url}/vision/state"
-                async with session.get(a11y_url) as response:
-                    if response.status == 200:
-                        state_data = await response.json()
+            a11y_url = f"{self.url}/vision/state"
+            response = requests.get(a11y_url)
 
-                        return {
-                            "current_activity": state_data["activity"],
-                            "keyboard_shown": state_data["keyboardShown"],
-                        }
-                    else:
-                        return {
-                            "error": f"Failed to get device state: HTTP {response.status}",
-                            "current_activity": "Unknown",
-                            "keyboard_shown": False,
-                        }
+            if response.status_code == 200:
+                state_data = response.json()
+
+                return {
+                    "current_activity": state_data["activity"],
+                    "keyboard_shown": state_data["keyboardShown"],
+                }
+            else:
+                return {
+                    "error": f"Failed to get device state: HTTP {response.status_code}",
+                    "current_activity": "Unknown",
+                    "keyboard_shown": False,
+                }
 
         except Exception as e:
             return {"error": str(e), "message": f"Error getting phone state: {str(e)}"}
 
-    async def list_packages(self, include_system_apps: bool = True) -> List[str]:
+    def list_packages(self, include_system_apps: bool = True) -> List[str]:
         all_packages = set(self.bundle_identifiers)
         if include_system_apps:
             all_packages.update(SYSTEM_BUNDLE_IDENTIFIERS)
         return sorted(list(all_packages))
 
-
-    async def remember(self, information: str) -> str:
+    def remember(self, information: str) -> str:
         """
         Store important information to remember for future context.
 

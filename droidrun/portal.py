@@ -2,8 +2,7 @@ import requests
 import tempfile
 import os
 import contextlib
-from droidrun.adb import Device, DeviceManager
-import asyncio
+from adbutils import adb, AdbDevice
 
 REPO = "droidrun/droidrun-portal"
 ASSET_NAME = "droidrun-portal"
@@ -74,15 +73,15 @@ def download_portal_apk(debug: bool = False):
             os.unlink(tmp.name)
 
 
-async def enable_portal_accessibility(device: Device):
-    await device.shell(
+def enable_portal_accessibility(device: AdbDevice):
+    device.shell(
         f"settings put secure enabled_accessibility_services {A11Y_SERVICE_NAME}"
     )
-    await device.shell("settings put secure accessibility_enabled 1")
+    device.shell("settings put secure accessibility_enabled 1")
 
 
-async def check_portal_accessibility(device: Device, debug: bool = False) -> bool:
-    a11y_services = await device.shell(
+def check_portal_accessibility(device: AdbDevice, debug: bool = False) -> bool:
+    a11y_services = device.shell(
         "settings get secure enabled_accessibility_services"
     )
     if not A11Y_SERVICE_NAME in a11y_services:
@@ -90,7 +89,7 @@ async def check_portal_accessibility(device: Device, debug: bool = False) -> boo
             print(a11y_services)
         return False
 
-    a11y_enabled = await device.shell("settings get secure accessibility_enabled")
+    a11y_enabled = device.shell("settings get secure accessibility_enabled")
     if a11y_enabled != "1":
         if debug:
             print(a11y_enabled)
@@ -99,12 +98,12 @@ async def check_portal_accessibility(device: Device, debug: bool = False) -> boo
     return True
 
 
-async def ping_portal(device: Device, debug: bool = False):
+def ping_portal(device: AdbDevice, debug: bool = False):
     """
     Ping the Droidrun Portal to check if it is installed and accessible.
     """
     try:
-        packages = await device.list_packages()
+        packages = device.list_packages()
     except Exception as e:
         raise Exception(f"Failed to list packages: {e}")
 
@@ -113,14 +112,14 @@ async def ping_portal(device: Device, debug: bool = False):
             print(packages)
         raise Exception("Portal is not installed on the device")
 
-    if not await check_portal_accessibility(device, debug):
-        await device.shell("am start -a android.settings.ACCESSIBILITY_SETTINGS")
+    if not check_portal_accessibility(device, debug):
+        device.shell("am start -a android.settings.ACCESSIBILITY_SETTINGS")
         raise Exception(
             "Droidrun Portal is not enabled as an accessibility service on the device"
         )
 
     try:
-        state = await device.shell(
+        state = device.shell(
             "content query --uri content://com.droidrun.portal/state"
         )
         if not "Row: 0 result=" in state:
@@ -130,10 +129,10 @@ async def ping_portal(device: Device, debug: bool = False):
         raise Exception(f"Droidrun Portal is not reachable: {e}")
 
 
-async def test():
-    device = await DeviceManager().get_device()
-    await ping_portal(device, debug=False)
+def test():
+    device = adb.device()
+    ping_portal(device, debug=False)
 
 
 if __name__ == "__main__":
-    asyncio.run(test())
+    test()

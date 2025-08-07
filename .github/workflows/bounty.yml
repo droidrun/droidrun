@@ -1,0 +1,134 @@
+name: "Project V2: Status ← issue label"
+
+on:
+  issues:
+    types: [labeled]
+
+env:
+  ORG: droidrun
+  PROJECT_NUMBER: 2
+  PROJECT_TOKEN: ${{ secrets.BOUNTY_SECRET }}
+
+jobs:
+  update_status:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Fetch project & field metadata
+        id: metadata
+        env:
+          GH_TOKEN: ${{ env.PROJECT_TOKEN }}
+        run: |
+          # 1) Query projectV2 ID and the Status field + its options
+          gh api graphql -f query='
+            query($org:String!,$num:Int!){
+              organization(login:$org){
+                projectV2(number:$num){
+                  id
+                  fields(first:20){
+                    nodes{
+                      ... on ProjectV2SingleSelectField{
+                        id
+                        name
+                        options { id name }
+                      }
+                    }
+                  }
+                }
+              }
+            }' \
+            -f org="${ORG}" -F num=${PROJECT_NUMBER} \
+            --jq '
+              .data.organization.projectV2 as $p |
+              ($p.id) as $projId |
+              ($p.fields.nodes[] | select(.name=="Status")) as $f |
+              {
+                projectId: $projId,
+                statusFieldId: $f.id,
+                options: ($f.options | map({(.name): .id}) | add)
+              }
+            ' > meta.json
+
+          # expose to GH env
+          echo "PROJECT_ID=$(jq -r .projectId meta.json)" >> $GITHUB_ENV
+          echo "STATUS_FIELD_ID=$(jq -r .statusFieldId meta.json)" >> $GITHUB_ENV
+          # options is an object like {"Eligible":"ID1","Bounty Posted":"ID2",...}
+          echo "STATUS_OPTIONS=$(jq -c .options meta.json)" >> $GITHUB_ENV
+
+      - name: Determine target option ID
+        id: pick
+        run: |
+          LABEL="${{ github.event.label.name }}"
+          # map label→ field option name
+          case "$LABEL" in
+            eligible)      OPT_NAME="📝 Eligible"      ;;
+            bounty-official) OPT_NAME="💰 Bounty" ;;
+            claimed)       OPT_NAME="🛠️ In Progress"   ;;
+            *) echo "No matching status for $LABEL"; exit 0 ;;
+          esac
+
+          # extract from JSON map
+          OPT_ID=$(echo "$STATUS_OPTIONS" | jq -r --arg name "$OPT_NAME" '.[$name]')
+          echo "OPTION_ID=$OPT_ID" >> $GITHUB_ENV
+
+      - name: Ensure issue is in the project
+        id: add_if_missing
+        env:
+          GH_TOKEN: ${{ env.PROJECT_TOKEN }}
+        run: |
+          ISSUE_NODE_ID=$(gh api graphql -f query='
+          query($owner:String!,$repo:String!,$number:Int!){
+            repository(owner:$owner, name:$repo){
+              issue(number:$number){
+                id
+                projectItems(first:1){
+                  nodes{ id }
+                }
+              }
+            }
+          }' \
+          -f owner="droidrun" \
+          -f repo="droidrun" \
+          -F number=104 \
+          --jq '.data.repository.issue as $i |
+          { issueId: $i.id,
+            itemId: ($i.projectItems.nodes[0]?.id // "") }' )
+
+          # Save to file
+          echo "$ISSUE_NODE_ID" > issue.json
+          ISSUE_ID=$(jq -r .issueId issue.json)
+          ITEM_ID=$(jq -r .itemId issue.json)
+
+          if [ -z "$ITEM_ID" ]; then
+            ITEM_ID=$(gh api graphql -f query='
+              mutation($proj:ID!,$content:ID!){
+                addProjectV2ItemById(input:{projectId:$proj, contentId:$content}){
+                  item { id }
+                }
+              }' \
+              -f proj="${PROJECT_ID}" -f content="$ISSUE_ID" \
+              --jq '.data.addProjectV2ItemById.item.id')
+          fi
+          echo "ITEM_ID=$ITEM_ID" >> $GITHUB_ENV
+
+      - name: Update Status field
+        env:
+          GH_TOKEN: ${{ env.PROJECT_TOKEN }}
+        run: |
+          gh api graphql -f query='
+          mutation($proj:ID!,$item:ID!,$field:ID!,$opt:String!){
+            updateProjectV2ItemFieldValue(input:{
+              projectId: $proj,
+              itemId: $item,
+              fieldId: $field,
+              value: {
+                singleSelectOptionId: $opt
+              }
+            }) {
+              projectV2Item { id }
+            }
+          }' \
+          -f proj="${PROJECT_ID}" \
+          -f item="${ITEM_ID}" \
+          -f field="${STATUS_FIELD_ID}" \
+          -f opt="${OPTION_ID}"

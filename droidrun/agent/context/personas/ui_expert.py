@@ -13,6 +13,7 @@ UI_EXPERT = AgentPersona(
         Tools.input_text.__name__,
         Tools.press_key.__name__,
         Tools.tap_by_index.__name__, 
+        Tools.drag.__name__,
         Tools.remember.__name__,
         Tools.complete.__name__
     ],

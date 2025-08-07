@@ -10,7 +10,11 @@
 [![Benchmark](https://img.shields.io/badge/Benchmark-🏅-teal)](https://droidrun.ai/benchmark)
 [![Twitter Follow](https://img.shields.io/twitter/follow/droid_run?style=social)](https://x.com/droid_run)
 
-<a href="https://www.producthunt.com/products/droidrun-framework-for-mobile-agent?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-droidrun&#0045;framework&#0045;for&#0045;mobile&#0045;ai&#0045;agents" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=983810&theme=light&t=1751740003156" alt="Droidrun&#0032;Framework&#0032;for&#0032;mobile&#0032;AI&#0032;Agents&#0032; - Droidrun&#0032;–The&#0032;Missing&#0032;Bridge&#0032;Between&#0032;LLMs&#0032;and&#0032;Mobile&#0032;Devices | Product Hunt" style="width: 200px; height: 43px;" width="200" height="43" /></a>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=983810&theme=dark&period=daily&t=1753948032207">
+  <source media="(prefers-color-scheme: light)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=983810&theme=neutral&period=daily&t=1753948125523">
+  <a href="https://www.producthunt.com/products/droidrun-framework-for-mobile-agent?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_source=badge-droidrun" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=983810&theme=neutral&period=daily&t=1753948125523" alt="Droidrun - Give&#0032;AI&#0032;native&#0032;control&#0032;of&#0032;physical&#0032;&#0038;&#0032;virtual&#0032;phones&#0046; | Product Hunt" style="width: 200px; height: 54px;" width="200" height="54" /></a>
+</picture>
 
 
 
@@ -39,17 +43,21 @@ Read on how to get droidrun up and running within seconds in [our docs](https://
 
 ## 🎬 Demo Videos
 
-1. **Group Chat Summarization**: Let DroidRun summarize an escalated group chat for you.   
+1. **Accommodation booking**: Let Droidrun search for an apartment for you
 
-   [![Group Chat Summarizer](https://img.youtube.com/vi/ofEnSUHHxX8/0.jpg)](https://www.youtube.com/watch?v=ofEnSUHHxX8)
+   [![Droidrun Accommodation Booking Demo](https://img.youtube.com/vi/VUpCyq1PSXw/0.jpg)](https://youtu.be/VUpCyq1PSXw)
 
-2. **Travel Search Assistant**: Wittness DroidRun looking for the cheapest stay and share it with a colleague on telegram.    
+<br>
 
-   [![Travel Search Assistant](https://img.youtube.com/vi/QgtRaLS3NBM/0.jpg)](https://www.youtube.com/watch?v=QgtRaLS3NBM)
+2. **Trend Hunter**: Let Droidrun hunt down trending posts
 
-3. **Automate TikTok Shopping**: See how DroidRun looks for a stanley cup on TikTok Shop and send the product details via email.    
+   [![Droidrun Trend Hunter Demo](https://img.youtube.com/vi/7V8S2f8PnkQ/0.jpg)](https://youtu.be/7V8S2f8PnkQ)
 
-    [![TikTok Shopping Assistant](https://img.youtube.com/vi/ol3bivBAmn4/0.jpg)](https://www.youtube.com/watch?v=ol3bivBAmn4)
+<br>
+
+3. **Streak Saver**: Let Droidrun save your streak on your favorite language learning app
+
+   [![Droidrun Streak Saver Demo](https://img.youtube.com/vi/B5q2B467HKw/0.jpg)](https://youtu.be/B5q2B467HKw)
 
 
 ## 💡 Example Use Cases

@@ -3,35 +3,33 @@ UI Actions - Core UI interaction tools for Android device control.
 """
 
 import os
+import io
 import json
 import time
-import asyncio
 import logging
 from llama_index.core.workflow import Context
-from typing import Optional, Dict, Tuple, List, Any, Type, Self
-from droidrun.adb.device import Device
-from droidrun.adb.manager import DeviceManager
+from typing import Optional, Dict, Tuple, List, Any
 from droidrun.tools.tools import Tools
-from droidrun.agent.common.events import TapActionEvent, KeyPressActionEvent, SwipeActionEvent, InputTextActionEvent, StartAppEvent
+from droidrun.agent.common.events import TapActionEvent, KeyPressActionEvent, SwipeActionEvent, InputTextActionEvent, StartAppEvent, DragActionEvent
+from droidrun.tools.tools import Tools
+from adbutils import adb
 
-
-logger = logging.getLogger("droidrun-adb-tools")
+logger = logging.getLogger("droidrun-tools")
 
 
 class AdbTools(Tools):
     """Core UI interaction tools for Android device control."""
 
-    def __init__(self, serial: str) -> None:
+    def __init__(self, serial: str | None = None) -> None:
         """Initialize the AdbTools instance.
 
         Args:
             serial: Device serial number
         """
         self._ctx = None
-        self.device_manager = DeviceManager()
+        self.device = adb.device(serial=serial)
         # Instance‐level cache for clickable elements (index-based tapping)
         self.clickable_elements_cache: List[Dict[str, Any]] = []
-        self.serial = serial
         self.last_screenshot = None
         self.reason = None
         self.success = None
@@ -40,50 +38,9 @@ class AdbTools(Tools):
         self.memory: List[str] = []
         # Store all screenshots with timestamps
         self.screenshots: List[Dict[str, Any]] = []
-
-    @classmethod
-    async def create(cls: Type[Self], serial: str = None) -> Self:
-        """Create an AdbTools instance.
-
-        Args:
-            serial: Optional device serial number. If not provided, the first device found will be used.
-
-        Returns:
-            AdbTools instance
-        """
-        if not serial:
-            dvm = DeviceManager()
-            devices = await dvm.list_devices()
-            if not devices or len(devices) < 1:
-                raise ValueError("No devices found")
-            serial = devices[0].serial
-
-        return AdbTools(serial)
     
     def _set_context(self, ctx: Context):
         self._ctx = ctx
-
-    def _get_device_serial(self) -> str:
-        """Get the device serial from the instance or environment variable."""
-        # First try using the instance's serial
-        if self.serial:
-            return self.serial
-
-    async def _get_device(self) -> Optional[Device]:
-        """Get the device instance using the instance's serial or from environment variable.
-
-        Returns:
-            Device instance or None if not found
-        """
-        serial = self._get_device_serial()
-        if not serial:
-            raise ValueError("No device serial specified - set device_serial parameter")
-
-        device = await self.device_manager.get_device(serial)
-        if not device:
-            raise ValueError(f"Device {serial} not found")
-
-        return device
 
     def _parse_content_provider_output(
         self, raw_output: str
@@ -132,7 +89,7 @@ class AdbTools(Tools):
         except json.JSONDecodeError:
             return None
 
-    async def tap_by_index(self, index: int, serial: Optional[str] = None) -> str:
+    def tap_by_index(self, index: int) -> str:
         """
         Tap on a UI element by its index.
 
@@ -204,15 +161,12 @@ class AdbTools(Tools):
             x = (left + right) // 2
             y = (top + bottom) // 2
 
+            logger.debug(
+                f"Tapping element with index {index} at coordinates ({x}, {y})"
+            )
             # Get the device and tap at the coordinates
-            if serial:
-                device = await self.device_manager.get_device(serial)
-                if not device:
-                    return f"Error: Device {serial} not found"
-            else:
-                device = await self._get_device()
-
-            await device.tap(x, y)
+            self.device.click(x, y)
+            logger.debug(f"Tapped element with index {index} at coordinates ({x}, {y})")
 
             # Emit coordinate action event for trajectory recording
             
@@ -232,7 +186,7 @@ class AdbTools(Tools):
                 self._ctx.write_event_to_stream(tap_event)
 
             # Add a small delay to allow UI to update
-            await asyncio.sleep(0.5)
+            time.sleep(0.5)
 
             # Create a descriptive response
             response_parts = []
@@ -257,7 +211,7 @@ class AdbTools(Tools):
             return f"Error: {str(e)}"
 
     # Rename the old tap function to tap_by_coordinates for backward compatibility
-    async def tap_by_coordinates(self, x: int, y: int) -> bool:
+    def tap_by_coordinates(self, x: int, y: int) -> bool:
         """
         Tap on the device screen at specific coordinates.
 
@@ -269,22 +223,16 @@ class AdbTools(Tools):
             Bool indicating success or failure
         """
         try:
-            if self.serial:
-                device = await self.device_manager.get_device(self.serial)
-                if not device:
-                    return f"Error: Device {self.serial} not found"
-            else:
-                device = await self._get_device()
-
-            await device.tap(x, y)
-            print(f"Tapped at coordinates ({x}, {y})")
+            logger.debug(f"Tapping at coordinates ({x}, {y})")
+            self.device.click(x, y)
+            logger.debug(f"Tapped at coordinates ({x}, {y})")
             return True
         except ValueError as e:
-            print(f"Error: {str(e)}")
+            logger.debug(f"Error: {str(e)}")
             return False
 
     # Replace the old tap function with the new one
-    async def tap(self, index: int) -> str:
+    def tap(self, index: int) -> str:
         """
         Tap on a UI element by its index.
 
@@ -297,10 +245,10 @@ class AdbTools(Tools):
         Returns:
             Result message
         """
-        return await self.tap_by_index(index)
+        return self.tap_by_index(index)
 
-    async def swipe(
-        self, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int = 300
+    def swipe(
+        self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.3
     ) -> bool:
         """
         Performs a straight-line swipe gesture on the device screen.
@@ -310,42 +258,79 @@ class AdbTools(Tools):
             start_y: Starting Y coordinate
             end_x: Ending X coordinate
             end_y: Ending Y coordinate
-            duration_ms: Duration of swipe in milliseconds
+            duration: Duration of swipe in seconds
         Returns:
             Bool indicating success or failure
         """
         try:
-            if self.serial:
-                device = await self.device_manager.get_device(self.serial)
-                if not device:
-                    return f"Error: Device {self.serial} not found"
-            else:
-                device = await self._get_device()
+            logger.debug(
+                f"Swiping from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration} seconds"
+            )
+            self.device.swipe(start_x, start_y, end_x, end_y, duration)
 
-            await device.swipe(start_x, start_y, end_x, end_y, duration_ms)
-            
             if self._ctx:
                 swipe_event = SwipeActionEvent(
                     action_type="swipe",
-                    description=f"Swipe from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration_ms}ms",
+                    description=f"Swipe from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration} seconds",
                     start_x=start_x,
                     start_y=start_y,
                     end_x=end_x,
                     end_y=end_y,
-                    duration_ms=duration_ms
+                    duration_ms=duration * 1000
                 )
                 self._ctx.write_event_to_stream(swipe_event)
-        
-            await asyncio.sleep(1)
-            print(
-                f"Swiped from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration_ms}ms"
+
+            time.sleep(duration)
+            logger.debug(
+                f"Swiped from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration} seconds"
             )
             return True
         except ValueError as e:
             print(f"Error: {str(e)}")
             return False
 
-    async def input_text(self, text: str, serial: Optional[str] = None) -> str:
+    def drag(
+        self, start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 3
+    ) -> bool:
+        """
+        Performs a straight-line drag and drop gesture on the device screen.
+        Args:
+            start_x: Starting X coordinate
+            start_y: Starting Y coordinate
+            end_x: Ending X coordinate
+            end_y: Ending Y coordinate
+            duration: Duration of swipe in seconds
+        Returns:
+            Bool indicating success or failure
+        """
+        try:
+            logger.debug(
+                f"Dragging from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration} seconds"
+            )
+            self.device.drag(start_x, start_y, end_x, end_y, duration)
+
+            if self._ctx:
+                drag_event = DragActionEvent(
+                    action_type="drag",
+                    description=f"Drag from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration} seconds",
+                    start_x=start_x,
+                    start_y=start_y,
+                    end_x=end_x,
+                    end_y=end_y,
+                    duration_ms=duration * 1000
+                )
+                self._ctx.write_event_to_stream(drag_event)
+
+            time.sleep(duration)
+            logger.debug(
+                f"Dragged from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration} seconds"
+            )
+            return True
+        except ValueError as e:
+            print(f"Error: {str(e)}")
+            return False
+
+    def input_text(self, text: str) -> str:
         """
         Input text on the device.
         Always make sure that the Focused Element is not None before inputting text.
@@ -357,31 +342,19 @@ class AdbTools(Tools):
             Result message
         """
         try:
-            if serial:
-                device = await self.device_manager.get_device(serial)
-                if not device:
-                    return f"Error: Device {serial} not found"
-            else:
-                device = await self._get_device()
-
+            logger.debug(f"Inputting text: {text}")
             # Save the current keyboard
-            original_ime = await device._adb.shell(
-                device._serial, "settings get secure default_input_method"
-            )
+            original_ime = self.device.shell("settings get secure default_input_method")
             original_ime = original_ime.strip()
 
             # Enable the Droidrun keyboard
-            await device._adb.shell(
-                device._serial, "ime enable com.droidrun.portal/.DroidrunKeyboardIME"
-            )
+            self.device.shell("ime enable com.droidrun.portal/.DroidrunKeyboardIME")
 
             # Set the Droidrun keyboard as the default
-            await device._adb.shell(
-                device._serial, "ime set com.droidrun.portal/.DroidrunKeyboardIME"
-            )
+            self.device.shell("ime set com.droidrun.portal/.DroidrunKeyboardIME")
 
             # Wait for keyboard to change
-            await asyncio.sleep(1)
+            time.sleep(1)
 
             # Encode the text to Base64
             import base64
@@ -389,10 +362,10 @@ class AdbTools(Tools):
             encoded_text = base64.b64encode(text.encode()).decode()
 
             cmd = f'content insert --uri "content://com.droidrun.portal/keyboard/input" --bind base64_text:s:"{encoded_text}"'
-            await device._adb.shell(device._serial, cmd)
+            self.device.shell(cmd)
 
             # Wait for text input to complete
-            await asyncio.sleep(0.5)
+            time.sleep(0.5)
 
             if self._ctx:
                 input_event = InputTextActionEvent(
@@ -404,33 +377,30 @@ class AdbTools(Tools):
 
             # Restore the original keyboard
             if original_ime and "com.droidrun.portal" not in original_ime:
-                await device._adb.shell(device._serial, f"ime set {original_ime}")
+                self.device.shell(f"ime set {original_ime}")
 
+            logger.debug(
+                f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
+            )
             return f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
         except ValueError as e:
             return f"Error: {str(e)}"
         except Exception as e:
             return f"Error sending text input: {str(e)}"
 
-    async def back(self) -> str:
+    def back(self) -> str:
         """
         Go back on the current view.
         This presses the Android back button.
         """
         try:
-            if self.serial:
-                device = await self.device_manager.get_device(self.serial)
-                if not device:
-                    return f"Error: Device {self.serial} not found"
-            else:
-                device = await self._get_device()
-
-            await device.press_key(3)
+            logger.debug("Pressing key BACK")
+            self.device.keyevent(3)
             return f"Pressed key BACK"
         except ValueError as e:
             return f"Error: {str(e)}"
 
-    async def press_key(self, keycode: int) -> str:
+    def press_key(self, keycode: int) -> str:
         """
         Press a key on the Android device.
 
@@ -444,13 +414,6 @@ class AdbTools(Tools):
             keycode: Android keycode to press
         """
         try:
-            if self.serial:
-                device = await self.device_manager.get_device(self.serial)
-                if not device:
-                    return f"Error: Device {self.serial} not found"
-            else:
-                device = await self._get_device()
-
             key_names = {
                 66: "ENTER",
                 4: "BACK",
@@ -459,8 +422,8 @@ class AdbTools(Tools):
             }
             key_name = key_names.get(keycode, str(keycode))
 
-            await device.press_key(keycode)
-            
+            logger.debug(f"Pressing key {key_name}")
+            self.device.keyevent(keycode)
             if self._ctx:
                 key_event = KeyPressActionEvent(
                     action_type="key_press",
@@ -469,12 +432,12 @@ class AdbTools(Tools):
                     key_name=key_name
                 )
                 self._ctx.write_event_to_stream(key_event)
-            
+            logger.debug(f"Pressed key {key_name}")
             return f"Pressed key {key_name}"
         except ValueError as e:
             return f"Error: {str(e)}"
 
-    async def start_app(self, package: str, activity: str = "") -> str:
+    def start_app(self, package: str, activity: str | None = None) -> str:
         """
         Start an app on the device.
 
@@ -483,28 +446,31 @@ class AdbTools(Tools):
             activity: Optional activity name
         """
         try:
-            if self.serial:
-                device = await self.device_manager.get_device(self.serial)
-                if not device:
-                    return f"Error: Device {self.serial} not found"
-            else:
-                device = await self._get_device()
-                
-            result = await device.start_app(package, activity)
+            logger.debug(f"Starting app {package} with activity {activity}")
+            if not activity:
+                # Find launcher activity from dumpsys
+                dumpsys_output = self.device.shell(f"cmd package resolve-activity --brief {package}") 
+                activity = dumpsys_output.splitlines()[1].split("/")[1]
+
+            print(f"Activity: {activity}")
+
+            self.device.app_start(package, activity)
 
             if self._ctx:
                 start_app_event = StartAppEvent(
                     action_type="start_app",
                     description=f"Start app {package}",
-                    package=package
+                    package=package,
+                    activity=activity
                 )
                 self._ctx.write_event_to_stream(start_app_event)
 
-            return result
-        except ValueError as e:
+            logger.debug(f"App started: {package} with activity {activity}")
+            return f"App started: {package} with activity {activity}"
+        except Exception as e:
             return f"Error: {str(e)}"
 
-    async def install_app(
+    def install_app(
         self, apk_path: str, reinstall: bool = False, grant_permissions: bool = True
     ) -> str:
         """
@@ -516,50 +482,51 @@ class AdbTools(Tools):
             grant_permissions: Whether to grant all permissions
         """
         try:
-            if self.serial:
-                device = await self.device_manager.get_device(self.serial)
-                if not device:
-                    return f"Error: Device {self.serial} not found"
-            else:
-                device = await self._get_device()
-
             if not os.path.exists(apk_path):
                 return f"Error: APK file not found at {apk_path}"
 
-            result = await device.install_app(apk_path, reinstall, grant_permissions)
+            logger.debug(
+                f"Installing app: {apk_path} with reinstall: {reinstall} and grant_permissions: {grant_permissions}"
+            )
+            result = self.device.install(
+                apk_path,
+                nolaunch=True,
+                uninstall=reinstall,
+                flags=["-g"] if grant_permissions else [],
+                silent=True,
+            )
+            logger.debug(f"Installed app: {apk_path} with result: {result}")
             return result
         except ValueError as e:
             return f"Error: {str(e)}"
 
-    async def take_screenshot(self) -> Tuple[str, bytes]:
+    def take_screenshot(self) -> Tuple[str, bytes]:
         """
         Take a screenshot of the device.
         This function captures the current screen and adds the screenshot to context in the next message.
         Also stores the screenshot in the screenshots list with timestamp for later GIF creation.
         """
         try:
-            if self.serial:
-                device = await self.device_manager.get_device(self.serial)
-                if not device:
-                    raise ValueError(f"Device {self.serial} not found")
-            else:
-                device = await self._get_device()
-            screen_tuple = await device.take_screenshot()
-            self.last_screenshot = screen_tuple[1]
+            logger.debug("Taking screenshot")
+            img = self.device.screenshot()
+            img_buf = io.BytesIO()
+            img_format = "PNG"
+            img.save(img_buf, format=img_format)
+            logger.debug("Screenshot taken")
 
             # Store screenshot with timestamp
             self.screenshots.append(
                 {
                     "timestamp": time.time(),
-                    "image_data": screen_tuple[1],
-                    "format": screen_tuple[0],  # Usually 'PNG'
+                    "image_data": img_buf.getvalue(),
+                    "format": img_format,  # Usually 'PNG'
                 }
             )
-            return screen_tuple
+            return img_format, img_buf.getvalue()
         except ValueError as e:
             raise ValueError(f"Error taking screenshot: {str(e)}")
 
-    async def list_packages(self, include_system_apps: bool = False) -> List[str]:
+    def list_packages(self, include_system_apps: bool = False) -> List[str]:
         """
         List installed packages on the device.
 
@@ -570,14 +537,8 @@ class AdbTools(Tools):
             List of package names
         """
         try:
-            if self.serial:
-                device = await self.device_manager.get_device(self.serial)
-                if not device:
-                    raise ValueError(f"Device {self.serial} not found")
-            else:
-                device = await self._get_device()
-
-            return await device.list_packages(include_system_apps)
+            logger.debug("Listing packages")
+            return self.device.list_packages(["-3"] if not include_system_apps else [])
         except ValueError as e:
             raise ValueError(f"Error listing packages: {str(e)}")
 
@@ -600,7 +561,7 @@ class AdbTools(Tools):
             self.reason = reason
             self.finished = True
 
-    async def remember(self, information: str) -> str:
+    def remember(self, information: str) -> str:
         """
         Store important information to remember for future context.
 
@@ -636,7 +597,7 @@ class AdbTools(Tools):
         """
         return self.memory.copy()
 
-    async def get_state(self, serial: Optional[str] = None) -> Dict[str, Any]:
+    def get_state(self, serial: Optional[str] = None) -> Dict[str, Any]:
         """
         Get both the a11y tree and phone state in a single call using the combined /state endpoint.
 
@@ -648,15 +609,8 @@ class AdbTools(Tools):
         """
 
         try:
-            if serial:
-                device = await self.device_manager.get_device(serial)
-                if not device:
-                    raise ValueError(f"Device {serial} not found")
-            else:
-                device = await self._get_device()
-
-            adb_output = await device._adb.shell(
-                device._serial,
+            logger.debug("Getting state")
+            adb_output = self.device.shell(
                 "content query --uri content://com.droidrun.portal/state",
             )
 
@@ -726,10 +680,58 @@ class AdbTools(Tools):
             }
 
 
+def _shell_test_cli(serial: str, command: str) -> tuple[str, float]:
+    """
+    Run an adb shell command using the adb CLI and measure execution time.
+    Args:
+        serial: Device serial number
+        command: Shell command to run
+    Returns:
+        Tuple of (output, elapsed_time)
+    """
+    import time
+    import subprocess
+
+    adb_cmd = ["adb", "-s", serial, "shell", command]
+    start = time.perf_counter()
+    result = subprocess.run(adb_cmd, capture_output=True, text=True)
+    elapsed = time.perf_counter() - start
+    output = result.stdout.strip() if result.returncode == 0 else result.stderr.strip()
+    return output, elapsed
+
+
+def _shell_test():
+    device = adb.device("emulator-5554")
+    # Native Python adb client
+    start = time.time()
+    res = device.shell("echo 'Hello, World!'")
+    end = time.time()
+    print(f"[Native] Shell execution took {end - start:.3f} seconds: {res}")
+
+    start = time.time()
+    res = device.shell("content query --uri content://com.droidrun.portal/state")
+    end = time.time()
+    print(f"[Native] Shell execution took {end - start:.3f} seconds: phone_state")
+
+    # CLI version
+    output, elapsed = _shell_test_cli("emulator-5554", "echo 'Hello, World!'")
+    print(f"[CLI] Shell execution took {elapsed:.3f} seconds: {output}")
+
+    output, elapsed = _shell_test_cli(
+        "emulator-5554", "content query --uri content://com.droidrun.portal/state"
+    )
+    print(f"[CLI] Shell execution took {elapsed:.3f} seconds: phone_state")
+
+
+def _list_packages():
+    tools = AdbTools()
+    print(tools.list_packages())
+
+
+def _start_app():
+    tools = AdbTools()
+    tools.start_app("com.android.settings", ".Settings")
+
+
 if __name__ == "__main__":
-
-    async def main():
-        tools = await AdbTools.create()
-        print(tools.serial)
-
-    asyncio.run(main())
+    _start_app()
