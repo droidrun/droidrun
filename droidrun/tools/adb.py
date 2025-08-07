@@ -10,7 +10,14 @@ import logging
 from llama_index.core.workflow import Context
 from typing import Optional, Dict, Tuple, List, Any
 from droidrun.tools.tools import Tools
-from droidrun.agent.common.events import TapActionEvent, KeyPressActionEvent, SwipeActionEvent, InputTextActionEvent, StartAppEvent, DragActionEvent
+from droidrun.agent.common.events import (
+    TapActionEvent,
+    KeyPressActionEvent,
+    SwipeActionEvent,
+    InputTextActionEvent,
+    StartAppEvent,
+    DragActionEvent,
+)
 from droidrun.tools.tools import Tools
 from adbutils import adb
 
@@ -38,7 +45,7 @@ class AdbTools(Tools):
         self.memory: List[str] = []
         # Store all screenshots with timestamps
         self.screenshots: List[Dict[str, Any]] = []
-    
+
     def _set_context(self, ctx: Context):
         self._ctx = ctx
 
@@ -169,11 +176,11 @@ class AdbTools(Tools):
             logger.debug(f"Tapped element with index {index} at coordinates ({x}, {y})")
 
             # Emit coordinate action event for trajectory recording
-            
+
             if self._ctx:
                 element_text = element.get("text", "No text")
                 element_class = element.get("className", "Unknown class")
-                
+
                 tap_event = TapActionEvent(
                     action_type="tap",
                     description=f"Tap element at index {index}: '{element_text}' ({element_class}) at coordinates ({x}, {y})",
@@ -181,7 +188,7 @@ class AdbTools(Tools):
                     y=y,
                     element_index=index,
                     element_text=element_text,
-                    element_bounds=bounds_str
+                    element_bounds=bounds_str,
                 )
                 self._ctx.write_event_to_stream(tap_event)
 
@@ -276,7 +283,7 @@ class AdbTools(Tools):
                     start_y=start_y,
                     end_x=end_x,
                     end_y=end_y,
-                    duration_ms=duration * 1000
+                    duration=duration,
                 )
                 self._ctx.write_event_to_stream(swipe_event)
 
@@ -317,7 +324,7 @@ class AdbTools(Tools):
                     start_y=start_y,
                     end_x=end_x,
                     end_y=end_y,
-                    duration_ms=duration * 1000
+                    duration=duration,
                 )
                 self._ctx.write_event_to_stream(drag_event)
 
@@ -371,7 +378,7 @@ class AdbTools(Tools):
                 input_event = InputTextActionEvent(
                     action_type="input_text",
                     description=f"Input text: '{text[:50]}{'...' if len(text) > 50 else ''}'",
-                    text=text
+                    text=text,
                 )
                 self._ctx.write_event_to_stream(input_event)
 
@@ -396,6 +403,16 @@ class AdbTools(Tools):
         try:
             logger.debug("Pressing key BACK")
             self.device.keyevent(3)
+
+            if self._ctx:
+                key_event = KeyPressActionEvent(
+                    action_type="key_press",
+                    description=f"Pressed key BACK",
+                    keycode=3,
+                    key_name="BACK",
+                )
+                self._ctx.write_event_to_stream(key_event)
+
             return f"Pressed key BACK"
         except ValueError as e:
             return f"Error: {str(e)}"
@@ -424,14 +441,16 @@ class AdbTools(Tools):
 
             logger.debug(f"Pressing key {key_name}")
             self.device.keyevent(keycode)
+
             if self._ctx:
                 key_event = KeyPressActionEvent(
                     action_type="key_press",
                     description=f"Pressed key {key_name}",
                     keycode=keycode,
-                    key_name=key_name
+                    key_name=key_name,
                 )
                 self._ctx.write_event_to_stream(key_event)
+
             logger.debug(f"Pressed key {key_name}")
             return f"Pressed key {key_name}"
         except ValueError as e:
@@ -449,7 +468,9 @@ class AdbTools(Tools):
             logger.debug(f"Starting app {package} with activity {activity}")
             if not activity:
                 # Find launcher activity from dumpsys
-                dumpsys_output = self.device.shell(f"cmd package resolve-activity --brief {package}") 
+                dumpsys_output = self.device.shell(
+                    f"cmd package resolve-activity --brief {package}"
+                )
                 activity = dumpsys_output.splitlines()[1].split("/")[1]
 
             print(f"Activity: {activity}")
@@ -461,7 +482,7 @@ class AdbTools(Tools):
                     action_type="start_app",
                     description=f"Start app {package}",
                     package=package,
-                    activity=activity
+                    activity=activity,
                 )
                 self._ctx.write_event_to_stream(start_app_event)
 
