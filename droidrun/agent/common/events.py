@@ -36,3 +36,12 @@ class KeyPressActionEvent(MacroEvent):
 class StartAppEvent(MacroEvent):
     """"Event for starting an app"""
     package: str
+    activity: str = ""
+
+class DragActionEvent(MacroEvent):
+    """Event for drag actions with coordinates"""
+    start_x: int
+    start_y: int
+    end_x: int
+    end_y: int
+    duration_ms: int
