@@ -17,7 +17,7 @@ from droidrun.agent.utils.executer import SimpleCodeExecutor
 from droidrun.agent.utils import chat_utils
 from droidrun.agent.context.task_manager import TaskManager
 from droidrun.tools import Tools
-from droidrun.agent.common.events import ScreenshotEvent, RecordActionEvent, RecordUIStateEvent
+from droidrun.agent.common.events import ScreenshotEvent, RecordUIStateEvent
 from droidrun.agent.planner.events import (
     PlanInputEvent,
     PlanCreatedEvent,
@@ -175,9 +175,7 @@ class PlannerAgent(Workflow):
                 screenshots = result['screenshots']
                 for screenshot in screenshots[:-1]: # the last screenshot will be captured by next step
                     ctx.write_event_to_stream(ScreenshotEvent(screenshot=screenshot))
-                actions = result['actions']
-                for action in actions:
-                    ctx.write_event_to_stream(RecordActionEvent(action=action['action'], args=action['args'], kwargs=action['kwargs']))
+                
                 ui_states = result['ui_states']
                 for ui_state in ui_states[:-1]:
                     ctx.write_event_to_stream(RecordUIStateEvent(ui_state=ui_state['a11y_tree']))

@@ -18,7 +18,7 @@ from droidrun.agent.codeact.events import (
     TaskThinkingEvent,
     EpisodicMemoryEvent,
 )
-from droidrun.agent.common.events import ScreenshotEvent, RecordActionEvent, RecordUIStateEvent
+from droidrun.agent.common.events import ScreenshotEvent, RecordUIStateEvent
 from droidrun.agent.utils import chat_utils
 from droidrun.agent.utils.executer import SimpleCodeExecutor
 from droidrun.agent.codeact.prompts import (
@@ -259,10 +259,6 @@ class CodeActAgent(Workflow):
             ui_states = result['ui_states']
             for ui_state in ui_states[:-1]:
                 ctx.write_event_to_stream(RecordUIStateEvent(ui_state=ui_state['a11y_tree']))
-
-            actions = result['actions']
-            for action in actions:
-                ctx.write_event_to_stream(RecordActionEvent(action=action['action'], args=action['args'], kwargs=action['kwargs']))
 
             if self.tools.finished == True:
                 logger.debug("  - Task completed.")
