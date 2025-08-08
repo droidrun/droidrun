@@ -1,4 +1,5 @@
 from llama_index.core.workflow import Event
+from typing import Dict, Any
 
 class ScreenshotEvent(Event):
     screenshot: bytes
@@ -45,3 +46,6 @@ class StartAppEvent(MacroEvent):
     """"Event for starting an app"""
     package: str
     activity: str = None
+
+class RecordUIStateEvent(Event):
+    ui_state: list[Dict[str, Any]]
