@@ -37,7 +37,6 @@ class Tools(ABC):
                     step_screenshots.append(self.take_screenshot()[1])
                 if step_ui_states is not None:
                     step_ui_states.append(self.get_state())
-            
             return result
         return wrapper
 

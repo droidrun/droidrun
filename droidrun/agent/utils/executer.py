@@ -143,6 +143,6 @@ class SimpleCodeExecutor:
         result = {
             'output': output,
             'screenshots': self.globals['step_screenshots'],
-            'ui_states': self.globals['step_ui_states']
+            'ui_states': self.globals['step_ui_states'],
         }
         return result

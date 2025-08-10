@@ -16,7 +16,7 @@ from droidrun.agent.planner import PlannerAgent
 from droidrun.agent.context.task_manager import TaskManager
 from droidrun.agent.utils.trajectory import Trajectory
 from droidrun.tools import Tools, describe_tools
-from droidrun.agent.common.events import ScreenshotEvent, MacroEvent
+from droidrun.agent.common.events import ScreenshotEvent, MacroEvent, RecordUIStateEvent
 from droidrun.agent.common.default import MockWorkflow
 from droidrun.agent.context import ContextInjectionManager
 from droidrun.agent.context.agent_persona import AgentPersona
@@ -432,6 +432,9 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
                 self.trajectory.screenshots.append(ev.screenshot)
             elif isinstance(ev, MacroEvent):
                 self.trajectory.macro.append(ev)
+            elif isinstance(ev, RecordUIStateEvent):
+                self.trajectory.ui_states.append(ev.ui_state)
+
             else:
                 self.trajectory.events.append(ev)
 
