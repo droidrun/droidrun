@@ -17,27 +17,70 @@ class Tools(ABC):
 
     @staticmethod
     def ui_action(func):
-        """"
-        Decorator to capture screenshots and UI states for actions that modify the UI.
         """
+        Decorator to (1) securely resolve placeholders in args/kwargs using a
+        credential manager if present on the Tools instance, and (2) capture
+        screenshots/UI states for actions that modify the UI.
+        """
+
         @wraps(func)
         def wrapper(*args, **kwargs):
             self = args[0]
+
+            # Securely resolve placeholders in args/kwargs if a credential manager is attached
+            cm = getattr(self, "credential_manager", None)
+            if cm is not None:
+                try:
+                    # resolve in positional args
+                    resolved_args = [cm.resolve_placeholders(a) for a in args]
+                    # resolve in keyword args
+                    resolved_kwargs = {k: cm.resolve_placeholders(v) for k, v in kwargs.items()}
+                    args = tuple(resolved_args)
+                    kwargs = resolved_kwargs
+                except Exception:
+                    # On any resolution error, fall back to original args/kwargs
+                    logger.warning(
+                        "Failed to resolve placeholders in args/kwargs for %s. "
+                        "Falling back to original args/kwargs.",
+                        func.__name__,
+                        exc_info=sys.exc_info(),
+                    )
+
+    # Helper (non-abstract) tool to resolve placeholders using CredentialManager
+    def fill_credentials(self, **kwargs) -> Dict[str, Any]:
+        """
+        Resolve placeholders in provided keyword arguments using the attached
+        CredentialManager (if present). Returns the resolved mapping without
+        logging sensitive values.
+
+        Example:
+            tools.fill_credentials(username="{{USER_NAME}}", password="{{PASSWORD}}")
+        """
+        cm = getattr(self, "credential_manager", None)
+        if cm is None:
+            return kwargs
+        try:
+            return cm.resolve_placeholders(kwargs)
+        except Exception:
+            # On any error, return the original kwargs
+            return kwargs
+
             result = func(*args, **kwargs)
-            
+
             # Check if save_trajectories attribute exists and is set to "action"
             if hasattr(self, 'save_trajectories') and self.save_trajectories == "action":
                 frame = sys._getframe(1)
                 caller_globals = frame.f_globals
-                
+
                 step_screenshots = caller_globals.get('step_screenshots')
                 step_ui_states = caller_globals.get('step_ui_states')
-                
+
                 if step_screenshots is not None:
                     step_screenshots.append(self.take_screenshot()[1])
                 if step_ui_states is not None:
                     step_ui_states.append(self.get_state())
             return result
+
         return wrapper
 
     @abstractmethod
@@ -166,6 +209,8 @@ def describe_tools(tools: Tools, exclude_tools: Optional[List[str]] = None) -> D
         # state management
         "remember": tools.remember,
         "complete": tools.complete,
+        # helpers
+        "fill_credentials": tools.fill_credentials,
     }
 
     # Remove excluded tools

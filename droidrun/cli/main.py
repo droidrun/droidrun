@@ -17,6 +17,8 @@ from droidrun.agent.context.personas import DEFAULT, BIG_AGENT
 from functools import wraps
 from droidrun.cli.logs import LogHandler
 from droidrun.telemetry import print_telemetry_message
+from droidrun.telemetry.tracker import set_redactor as set_telemetry_redactor
+from droidrun.agent.utils.credential_manager import CredentialManager
 from droidrun.portal import (
     download_portal_apk,
     enable_portal_accessibility,
@@ -35,7 +37,7 @@ os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 console = Console()
 
 
-def configure_logging(goal: str, debug: bool):
+def configure_logging(goal: str, debug: bool, redactor=None):
     logger = logging.getLogger("droidrun")
     logger.handlers = []
 
@@ -45,16 +47,25 @@ def configure_logging(goal: str, debug: bool):
         if debug
         else logging.Formatter("%(message)s", "%H:%M:%S")
     )
+    if redactor is not None:
+        class _RedactFilter(logging.Filter):
+            def filter(self, record: logging.LogRecord) -> bool:
+                try:
+                    record.msg = redactor(str(record.msg))
+                except Exception:
+                    logger.error("Error while redacting log message: %s", traceback.format_exc())
+                return True
+        handler.addFilter(_RedactFilter())
     logger.addHandler(handler)
 
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
     logger.propagate = False
 
-    if debug:
-        tools_logger = logging.getLogger("droidrun-tools")
-        tools_logger.addHandler(handler)
-        tools_logger.propagate = False
-        tools_logger.setLevel(logging.DEBUG if debug else logging.INFO)
+    tools_logger = logging.getLogger("droidrun-tools")
+    tools_logger.handlers = []
+    tools_logger.addHandler(handler)
+    tools_logger.propagate = False
+    tools_logger.setLevel(logging.DEBUG if debug else logging.INFO)
 
     return handler
 
@@ -85,10 +96,16 @@ async def run_command(
     save_trajectory: str = "none",
     ios: bool = False,
     allow_drag: bool = False,
+    credentials_file: str | None = None,
+    credentials_profile: str | None = None,
     **kwargs,
 ):
     """Run a command on your Android device using natural language."""
-    log_handler = configure_logging(command, debug)
+    # Build credential manager
+    cm = CredentialManager(file_path=credentials_file, profile=credentials_profile)
+    # Install redactors
+    set_telemetry_redactor(cm.redact_obj)
+    log_handler = configure_logging(command, debug, redactor=cm.redact)
     logger = logging.getLogger("droidrun")
 
     log_handler.update_step("Initializing...")
@@ -124,6 +141,13 @@ async def run_command(
                 if not ios
                 else IOSTools(url=device)
             )
+            # Attach credential manager to tools instance so decorators can resolve placeholders
+            try:
+                tools.credential_manager = cm
+            except AttributeError:
+                logger.warning(
+                    "Could not attach credential manager to tools instance."
+                )
             # Set excluded tools based on CLI flags
             excluded_tools = [] if allow_drag else ["drag"]
 
@@ -360,6 +384,8 @@ def cli(
     default=False,
 )
 @click.option("--ios", is_flag=True, help="Run on iOS device", default=False)
+@click.option("--credentials-file", type=str, default=None, help="Path to credentials JSON file")
+@click.option("--credentials-profile", type=str, default=None, help="Credentials profile name")
 def run(
     command: str,
     device: str | None,
@@ -378,6 +404,8 @@ def run(
     save_trajectory: str,
     allow_drag: bool,
     ios: bool,
+    credentials_file: str | None,
+    credentials_profile: str | None,
 ):
     """Run a command on your Android device using natural language."""
     # Call our standalone function
@@ -399,6 +427,8 @@ def run(
         save_trajectory=save_trajectory,
         allow_drag=allow_drag,
         ios=ios,
+        credentials_file=credentials_file,
+        credentials_profile=credentials_profile,
     )
 
 
