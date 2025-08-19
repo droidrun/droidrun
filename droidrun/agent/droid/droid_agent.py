@@ -4,7 +4,7 @@ to achieve a user's goal on an Android device.
 """
 
 import logging
-from typing import List
+from typing import List, Optional, Type
 
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import step, StartEvent, StopEvent, Workflow, Context
@@ -23,6 +23,8 @@ from droidrun.agent.context.agent_persona import AgentPersona
 from droidrun.agent.context.personas import DEFAULT
 from droidrun.agent.oneflows.reflector import Reflector
 from droidrun.telemetry import capture, flush, DroidAgentInitEvent, DroidAgentFinalizeEvent
+from droidrun.agent.utils.structured_output import coerce_to_model, schema_instruction
+from pydantic import BaseModel
 
 
 logger = logging.getLogger("droidrun")
@@ -138,6 +140,8 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
         self.cim = ContextInjectionManager(personas=personas)
         self.current_episodic_memory = None
 
+        self._output_schema: Optional[Type[BaseModel]] = None
+
         logger.info("🤖 Initializing DroidAgent...")
         logger.info(f"💾 Trajectory saving level: {self.save_trajectories}")
         
@@ -195,7 +199,44 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
         Run the DroidAgent workflow.
         """
         return super().run(*args, **kwargs)
-    
+
+    def set_output_schema(self, schema: Type[BaseModel]) -> None:
+        """Set a Pydantic schema for structured output.
+
+        When set, the agent will attempt to validate and return a model instance
+        from the final result instead of a plain dict.
+        """
+        self._output_schema = schema
+
+    def _build_structured_output(self, data: dict) -> Optional[BaseModel]:
+        """Build a structured output using the configured Pydantic schema (v2)."""
+        if not self._output_schema:
+            return None
+        try:
+            return coerce_to_model(self._output_schema, data)
+        except Exception as e:
+            logger.exception(
+                "Structured output validation failed: schema=%s, keys=%s, error=%s",
+                getattr(self._output_schema, "__name__", str(self._output_schema)),
+                sorted(list(data.keys())),
+                e,
+            )
+            return None
+
+    def get_output_schema_instruction(self) -> Optional[str]:
+        """Return a short instruction for LLM prompts based on the configured schema."""
+        if not self._output_schema:
+            return None
+        try:
+            return schema_instruction(self._output_schema)
+        except Exception as e:
+            logger.exception(
+                "Failed building schema instruction: schema=%s, error=%s",
+                getattr(self._output_schema, "__name__", str(self._output_schema)),
+                e,
+            )
+            return None
+
     @step
     async def execute_task(
         self,
@@ -227,6 +268,7 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
                 tools_instance=self.tools_instance,
                 debug=self.debug,
                 timeout=self.timeout,
+                output_schema_instruction=self.get_output_schema_instruction(),
             )
 
             handler = codeact_agent.run(
@@ -415,6 +457,10 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
         if self.trajectory and self.save_trajectories != "none":
             self.trajectory.save_trajectory()
 
+        # Return structured output if schema is configured and validation succeeds
+        structured = self._build_structured_output(result)
+        if structured is not None:
+            return StopEvent(structured)
         return StopEvent(result)
     
     def handle_stream_event(self, ev: Event, ctx: Context):
