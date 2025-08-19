@@ -4,7 +4,7 @@ to achieve a user's goal on an Android device.
 """
 
 import logging
-from typing import List
+from typing import List, Optional, Type
 
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import step, StartEvent, StopEvent, Workflow, Context
@@ -29,6 +29,10 @@ from droidrun.telemetry import (
     DroidAgentFinalizeEvent,
 )
 from droidrun.agent.usage import track_usage
+from droidrun.telemetry import capture, flush, DroidAgentInitEvent, DroidAgentFinalizeEvent
+from droidrun.agent.utils.structured_output import coerce_to_model, schema_instruction
+from pydantic import BaseModel
+
 
 logger = logging.getLogger("droidrun")
 
@@ -156,6 +160,8 @@ class DroidAgent(Workflow):
         self.response_tokens = self.token_tracker.usage.response_tokens  # 0 initially
         self.total_tokens = self.token_tracker.usage.total_tokens  # 0 initially
 
+        self._output_schema: Optional[Type[BaseModel]] = None
+
         logger.info("🤖 Initializing DroidAgent...")
         logger.info(f"💾 Trajectory saving level: {self.save_trajectories}")
         
@@ -215,8 +221,43 @@ class DroidAgent(Workflow):
         Run the DroidAgent workflow.
         """
         return super().run(*args, **kwargs)
-    
-        return super().run()
+
+    def set_output_schema(self, schema: Type[BaseModel]) -> None:
+        """Set a Pydantic schema for structured output.
+
+        When set, the agent will attempt to validate and return a model instance
+        from the final result instead of a plain dict.
+        """
+        self._output_schema = schema
+
+    def _build_structured_output(self, data: dict) -> Optional[BaseModel]:
+        """Build a structured output using the configured Pydantic schema (v2)."""
+        if not self._output_schema:
+            return None
+        try:
+            return coerce_to_model(self._output_schema, data)
+        except Exception as e:
+            logger.exception(
+                "Structured output validation failed: schema=%s, keys=%s, error=%s",
+                getattr(self._output_schema, "__name__", str(self._output_schema)),
+                sorted(list(data.keys())),
+                e,
+            )
+            return None
+
+    def get_output_schema_instruction(self) -> Optional[str]:
+        """Return a short instruction for LLM prompts based on the configured schema."""
+        if not self._output_schema:
+            return None
+        try:
+            return schema_instruction(self._output_schema)
+        except Exception as e:
+            logger.exception(
+                "Failed building schema instruction: schema=%s, error=%s",
+                getattr(self._output_schema, "__name__", str(self._output_schema)),
+                e,
+            )
+            return None
 
     @step
     async def execute_task(
@@ -247,6 +288,7 @@ class DroidAgent(Workflow):
                 tools_instance=self.tools_instance,
                 debug=self.debug,
                 timeout=self.timeout,
+                output_schema_instruction=self.get_output_schema_instruction(),
             )
 
             handler = codeact_agent.run(
@@ -500,6 +542,10 @@ class DroidAgent(Workflow):
         if self.trajectory and self.save_trajectories != "none":
             self.trajectory.save_trajectory()
 
+        # Return structured output if schema is configured and validation succeeds
+        structured = self._build_structured_output(result)
+        if structured is not None:
+            return StopEvent(structured)
         return StopEvent(result)
 
     def handle_stream_event(self, ev: Event, ctx: Context):
