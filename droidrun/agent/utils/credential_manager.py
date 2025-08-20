@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Any, Callable, Dict, Mapping, Optional
 
 PLACEHOLDER_RE = re.compile(r"\{\{([A-Z0-9_\.\-]+)\}\}")
 
@@ -195,3 +197,78 @@ class CredentialManager:
         if isinstance(obj, dict):
             return {k: self.redact_obj(v) for k, v in obj.items()}
         return obj
+
+    # ------------------------------ Tool wrappers ------------------------------
+    def wrap_tool(self, tool_callable: Callable[..., Any]) -> Callable[..., Any]:
+        """Return a callable wrapper around ``tool_callable``.
+
+        The wrapper resolves placeholders in the single params argument the
+        agent is expected to pass and forwards the resolved mapping to the
+        underlying tool. If ``tool_callable`` is asynchronous (a coroutine
+        function), the returned wrapper will also be async and await the
+        inner call.
+
+        The wrapper accepts a single positional argument (usually a mapping)
+        to match common agent tool calling conventions; if the agent passes
+        positional/keyword variations you can adapt the wrapper accordingly.
+        """
+        if not callable(tool_callable):
+            raise TypeError("tool_callable must be callable")
+
+        # Async tool
+        if inspect.iscoroutinefunction(tool_callable):
+            async def _async_wrapper(params: Mapping[str, Any] | Any = None) -> Any:
+                resolved = self._maybe_resolve_mapping(params)
+                return await tool_callable(resolved)
+
+            return _async_wrapper  # type: ignore[return-value]
+
+        # Sync tool
+        def _wrapper(params: Mapping[str, Any] | Any = None) -> Any:
+            resolved = self._maybe_resolve_mapping(params)
+            return tool_callable(resolved)
+
+        return _wrapper
+
+    async def wrap_tool_async(self, tool_callable: Callable[..., Any]) -> Callable[..., Any]:
+        """Compatibility helper: always return an async wrapper.
+
+        This is useful if your agent uniformly expects async callables. If
+        ``tool_callable`` is sync, it will be executed in the default loop's
+        executor so it does not block the event loop.
+        """
+        if not callable(tool_callable):
+            raise TypeError("tool_callable must be callable")
+
+        if inspect.iscoroutinefunction(tool_callable):
+            async def _async_wrapper(params: Mapping[str, Any] | Any = None) -> Any:
+                resolved = self._maybe_resolve_mapping(params)
+                return await tool_callable(resolved)
+
+            return _async_wrapper
+
+        async def _async_wrapper_sync(params: Mapping[str, Any] | Any = None) -> Any:
+            resolved = self._maybe_resolve_mapping(params)
+            loop = asyncio.get_running_loop()
+            # run sync tool in threadpool to avoid blocking
+            return await loop.run_in_executor(None, lambda: tool_callable(resolved))
+
+        return _async_wrapper_sync
+
+    def _maybe_resolve_mapping(self, params: Any) -> Any:
+        """If params looks like a mapping, resolve placeholders in it.
+
+        Otherwise return params unchanged. This keeps the wrapper tolerant
+        to varying agent calling conventions while still doing the secret
+        resolution for the common mapping case.
+        """
+        # None -> empty dict behaviour (commonly used)
+        if params is None:
+            return {}
+        # If it's a mapping (dict-like), create a dict and resolve
+        if isinstance(params, Mapping):
+            # Ensure it's a plain dict before deep-resolving
+            return self.resolve_placeholders(dict(params))
+        # If the tool expects a different shape (e.g. two positional args),
+        # callers need to adapt; we keep this implementation conservative.
+        return params

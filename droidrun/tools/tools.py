@@ -46,6 +46,24 @@ class Tools(ABC):
                         exc_info=sys.exc_info(),
                     )
 
+            result = func(*args, **kwargs)
+
+            # Check if save_trajectories attribute exists and is set to "action"
+            if hasattr(self, 'save_trajectories') and self.save_trajectories == "action":
+                frame = sys._getframe(1)
+                caller_globals = frame.f_globals
+
+                step_screenshots = caller_globals.get('step_screenshots')
+                step_ui_states = caller_globals.get('step_ui_states')
+
+                if step_screenshots is not None:
+                    step_screenshots.append(self.take_screenshot()[1])
+                if step_ui_states is not None:
+                    step_ui_states.append(self.get_state())
+            return result
+
+        return wrapper
+
     # Helper (non-abstract) tool to resolve placeholders using CredentialManager
     def fill_credentials(self, **kwargs) -> Dict[str, Any]:
         """
@@ -64,24 +82,6 @@ class Tools(ABC):
         except Exception:
             # On any error, return the original kwargs
             return kwargs
-
-            result = func(*args, **kwargs)
-
-            # Check if save_trajectories attribute exists and is set to "action"
-            if hasattr(self, 'save_trajectories') and self.save_trajectories == "action":
-                frame = sys._getframe(1)
-                caller_globals = frame.f_globals
-
-                step_screenshots = caller_globals.get('step_screenshots')
-                step_ui_states = caller_globals.get('step_ui_states')
-
-                if step_screenshots is not None:
-                    step_screenshots.append(self.take_screenshot()[1])
-                if step_ui_states is not None:
-                    step_ui_states.append(self.get_state())
-            return result
-
-        return wrapper
 
     @abstractmethod
     def get_state(self) -> Dict[str, Any]:
