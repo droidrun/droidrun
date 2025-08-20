@@ -264,8 +264,9 @@ wrap your code inside this:
 
 
             chat_history = await chat_utils.add_task_history_block(
-                self.task_manager.get_completed_tasks(),
-                self.task_manager.get_failed_tasks(),
+                #self.task_manager.get_completed_tasks(),
+                #self.task_manager.get_failed_tasks(),
+                self.task_manager.get_task_history(),
                 chat_history,
             )
 

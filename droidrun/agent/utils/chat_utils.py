@@ -120,7 +120,7 @@ async def add_ui_text_block(ui_state: str, chat_history: List[ChatMessage], copy
 
 async def add_screenshot_image_block(screenshot, chat_history: List[ChatMessage], copy = True) -> None:
     if screenshot:
-        image_block = ImageBlock(image=base64.b64encode(screenshot))
+        image_block = ImageBlock(image=screenshot)
         if copy:
             chat_history = chat_history.copy()  # Create a copy of chat history to avoid modifying the original
             chat_history[-1] = message_copy(chat_history[-1])
@@ -201,29 +201,31 @@ async def get_reflection_block(reflections: List[Reflection]) -> ChatMessage:
     
     return ChatMessage(role="user", content=reflection_block)
         
-async def add_task_history_block(completed_tasks: list[dict], failed_tasks: list[dict], chat_history: List[ChatMessage]) -> List[ChatMessage]: 
-    task_history = ""
+async def add_task_history_block(all_tasks: list[dict], chat_history: List[ChatMessage]) -> List[ChatMessage]:
+    """Experimental task history with all previous tasks."""
+    if not all_tasks:
+        return chat_history
 
-    # Combine all tasks and show in chronological order
-    all_tasks = completed_tasks + failed_tasks
-    
-    if all_tasks:
-        task_history += "Task History (chronological order):\n"
-        for i, task in enumerate(all_tasks, 1):
-            if hasattr(task, 'description'):
-                status_indicator = "[success]" if hasattr(task, 'status') and task.status == "completed" else "[failed]"
-                task_history += f"{i}. {status_indicator} {task.description}\n"
-            elif isinstance(task, dict):
-                # For backward compatibility with dict format
-                task_description = task.get('description', str(task))
-                status_indicator = "[success]" if task in completed_tasks else "[failed]"
-                task_history += f"{i}. {status_indicator} {task_description}\n"
-            else:
-                status_indicator = "[success]" if task in completed_tasks else "[failed]"
-                task_history += f"{i}. {status_indicator} {task}\n"
+    lines = ["### Task Execution History (chronological):"]
+    for index, task in enumerate(all_tasks, 1):
+        description: str
+        status_value: str
 
-    
-    task_block = TextBlock(text=f"{task_history}")
+        if hasattr(task, "description") and hasattr(task, "status"):
+            description = getattr(task, "description")
+            status_value = getattr(task, "status") or "unknown"
+        elif isinstance(task, dict):
+            description = str(task.get("description", task))
+            status_value = str(task.get("status", "unknown"))
+        else:
+            description = str(task)
+            status_value = "unknown"
+
+        indicator = f"[{status_value}]"
+
+        lines.append(f"{index}. {indicator} {description}")
+
+    task_block = TextBlock(text="\n".join(lines))
 
     chat_history = chat_history.copy()
     chat_history[-1] = message_copy(chat_history[-1])

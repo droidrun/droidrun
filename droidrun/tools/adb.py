@@ -23,13 +23,17 @@ import requests
 import base64
 
 logger = logging.getLogger("droidrun-tools")
+PORTAL_DEFAULT_TCP_PORT = 8080
 
 
 class AdbTools(Tools):
     """Core UI interaction tools for Android device control."""
 
     def __init__(
-        self, serial: str | None = None, use_tcp: bool = False, tcp_port: int = 8080
+        self,
+        serial: str | None = None,
+        use_tcp: bool = False,
+        remote_tcp_port: int = PORTAL_DEFAULT_TCP_PORT,
     ) -> None:
         """Initialize the AdbTools instance.
 
@@ -40,8 +44,7 @@ class AdbTools(Tools):
         """
         self.device = adb.device(serial=serial)
         self.use_tcp = use_tcp
-        self.tcp_port = tcp_port
-        self.tcp_base_url = f"http://localhost:{tcp_port}"
+        self.remote_tcp_port = remote_tcp_port
         self.tcp_forwarded = False
 
         self._ctx = None
@@ -71,18 +74,21 @@ class AdbTools(Tools):
         """
         try:
             logger.debug(
-                f"Setting up TCP port forwarding: tcp:{self.tcp_port} tcp:{self.tcp_port}"
+                f"Setting up TCP port forwarding for port tcp:{self.remote_tcp_port} on device {self.device.serial}"
             )
             # Use adb forward command to set up port forwarding
-            result = self.device.forward(f"tcp:{self.tcp_port}", f"tcp:{self.tcp_port}")
-            self.tcp_forwarded = True
-            logger.debug(f"TCP port forwarding set up successfully: {result}")
+            self.local_tcp_port = self.device.forward_port(self.remote_tcp_port)
+            self.tcp_base_url = f"http://localhost:{self.local_tcp_port}"
+            logger.debug(
+                f"TCP port forwarding set up successfully to {self.tcp_base_url}"
+            )
 
             # Test the connection with a ping
             try:
                 response = requests.get(f"{self.tcp_base_url}/ping", timeout=5)
                 if response.status_code == 200:
                     logger.debug("TCP connection test successful")
+                    self.tcp_forwarded = True
                     return True
                 else:
                     logger.warning(
@@ -107,10 +113,17 @@ class AdbTools(Tools):
         """
         try:
             if self.tcp_forwarded:
-                logger.debug(f"Removing TCP port forwarding for port {self.tcp_port}")
-                result = self.device.forward_remove(f"tcp:{self.tcp_port}")
+                logger.debug(
+                    f"Removing TCP port forwarding for port {self.local_tcp_port}"
+                )
+                # remove forwarding
+                cmd = f"killforward:tcp:{self.local_tcp_port}"
+                logger.debug(f"Removing TCP port forwarding: {cmd}")
+                c = self.device.open_transport(cmd)
+                c.close()
+
                 self.tcp_forwarded = False
-                logger.debug(f"TCP port forwarding removed: {result}")
+                logger.debug(f"TCP port forwarding removed")
                 return True
             return True
         except Exception as e:
@@ -433,59 +446,57 @@ class AdbTools(Tools):
         try:
             logger.debug(f"Inputting text: {text}")
 
-            if self.use_tcp and self.tcp_forwarded:
-                # Use TCP communication
-                encoded_text = base64.b64encode(text.encode()).decode()
+            # if self.use_tcp and self.tcp_forwarded:
+            #     # Use TCP communication
+            #     encoded_text = base64.b64encode(text.encode()).decode()
 
-                payload = {"base64_text": encoded_text}
-                response = requests.post(
-                    f"{self.tcp_base_url}/keyboard/input",
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=10,
-                )
+            #     payload = {"base64_text": encoded_text}
+            #     response = requests.post(
+            #         f"{self.tcp_base_url}/keyboard/input",
+            #         json=payload,
+            #         headers={"Content-Type": "application/json"},
+            #         timeout=10,
+            #     )
 
-                logger.debug(
-                    f"Keyboard input TCP response: {response.status_code}, {response.text}"
-                )
+            #     logger.debug(
+            #         f"Keyboard input TCP response: {response.status_code}, {response.text}"
+            #     )
 
-                if response.status_code != 200:
-                    return f"Error: HTTP request failed with status {response.status_code}: {response.text}"
+            #     if response.status_code != 200:
+            #         return f"Error: HTTP request failed with status {response.status_code}: {response.text}"
 
-            else:
-                # Fallback to content provider method
-                # Save the current keyboard
-                original_ime = self.device.shell(
-                    "settings get secure default_input_method"
-                )
-                original_ime = original_ime.strip()
+            # else:
+            # Fallback to content provider method
+            # Save the current keyboard
+            original_ime = self.device.shell("settings get secure default_input_method")
+            original_ime = original_ime.strip()
 
-                # Enable the Droidrun keyboard
-                self.device.shell("ime enable com.droidrun.portal/.DroidrunKeyboardIME")
+            # Enable the Droidrun keyboard
+            self.device.shell("ime enable com.droidrun.portal/.DroidrunKeyboardIME")
 
-                # Set the Droidrun keyboard as the default
-                self.device.shell("ime set com.droidrun.portal/.DroidrunKeyboardIME")
+            # Set the Droidrun keyboard as the default
+            self.device.shell("ime set com.droidrun.portal/.DroidrunKeyboardIME")
 
-                # Wait for keyboard to change
-                time.sleep(1)
+            # Wait for keyboard to change
+            time.sleep(1)
 
-                # Encode the text to Base64
-                encoded_text = base64.b64encode(text.encode()).decode()
+            # Encode the text to Base64
+            encoded_text = base64.b64encode(text.encode()).decode()
 
-                cmd = f'content insert --uri "content://com.droidrun.portal/keyboard/input" --bind base64_text:s:"{encoded_text}"'
-                self.device.shell(cmd)
+            cmd = f'content insert --uri "content://com.droidrun.portal/keyboard/input" --bind base64_text:s:"{encoded_text}"'
+            self.device.shell(cmd)
 
-                # Wait for text input to complete
-                time.sleep(0.5)
+            # Wait for text input to complete
+            time.sleep(0.5)
 
-                # Restore the original keyboard
-                if original_ime and "com.droidrun.portal" not in original_ime:
-                    self.device.shell(f"ime set {original_ime}")
+            # Restore the original keyboard
+            if original_ime and "com.droidrun.portal" not in original_ime:
+                self.device.shell(f"ime set {original_ime}")
 
-                logger.debug(
-                    f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
-                )
-                return f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
+            logger.debug(
+                f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
+            )
+            return f"Text input completed: {text[:50]}{'...' if len(text) > 50 else ''}"
 
             if self._ctx:
                 input_event = InputTextActionEvent(
@@ -643,48 +654,13 @@ class AdbTools(Tools):
         try:
             logger.debug("Taking screenshot")
 
-            if self.use_tcp and self.tcp_forwarded:
-                # Use TCP communication
-                response = requests.get(f"{self.tcp_base_url}/screenshot", timeout=15)
-
-                if response.status_code == 200:
-                    tcp_response = response.json()
-
-                    # Check if response has the expected format with data field
-                    if isinstance(tcp_response, dict) and "data" in tcp_response:
-                        base64_data = tcp_response["data"]
-                        try:
-                            # Decode base64 to get image bytes
-                            image_bytes = base64.b64decode(base64_data)
-                            img_format = "PNG"  # Assuming PNG format from TCP endpoint
-                            logger.debug("Screenshot taken via TCP")
-                        except Exception as e:
-                            raise ValueError(
-                                f"Failed to decode base64 screenshot data: {str(e)}"
-                            )
-                    else:
-                        # Fallback: assume direct base64 format
-                        try:
-                            image_bytes = base64.b64decode(tcp_response)
-                            img_format = "PNG"
-                            logger.debug("Screenshot taken via TCP (direct base64)")
-                        except Exception as e:
-                            raise ValueError(
-                                f"Failed to decode screenshot response: {str(e)}"
-                            )
-                else:
-                    raise ValueError(
-                        f"HTTP request failed with status {response.status_code}: {response.text}"
-                    )
-
-            else:
-                # Fallback to ADB screenshot method
-                img = self.device.screenshot()
-                img_buf = io.BytesIO()
-                img_format = "PNG"
-                img.save(img_buf, format=img_format)
-                image_bytes = img_buf.getvalue()
-                logger.debug("Screenshot taken via ADB")
+            # Fallback to ADB screenshot method
+            img = self.device.screenshot()
+            img_buf = io.BytesIO()
+            img_format = "PNG"
+            img.save(img_buf, format=img_format)
+            image_bytes = img_buf.getvalue()
+            logger.debug("Screenshot taken via ADB")
 
             # Store screenshot with timestamp
             self.screenshots.append(

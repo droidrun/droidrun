@@ -254,16 +254,24 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
             return CodeActResultEvent(success=False, reason=f"Error: {str(e)}", task=task, steps=[])
     
     @step
-    async def handle_codeact_execute(self, ctx: Context, ev: CodeActResultEvent) -> FinalizeEvent | ReflectionEvent:
+    async def handle_codeact_execute(self, ctx: Context, ev: CodeActResultEvent) -> FinalizeEvent | ReflectionEvent | ReasoningLogicEvent:
         try:
             task = ev.task
             if not self.reasoning:
                 return FinalizeEvent(success=ev.success, reason=ev.reason, output=ev.reason, task=[task], tasks=[task], steps=ev.steps)
             
-            if self.reflection:
+            if self.reflection and ev.success:
                 return ReflectionEvent(task=task)
-            
-            return ReasoningLogicEvent()
+
+            # Reasoning is enabled but reflection is disabled.
+            # Success: mark complete and proceed to next step in reasoning loop.
+            # Failure: mark failed and trigger planner immediately without advancing to the next queued task.
+            if ev.success:
+                self.task_manager.complete_task(task, message=ev.reason)
+                return ReasoningLogicEvent()
+            else:
+                self.task_manager.fail_task(task, failure_reason=ev.reason)
+                return ReasoningLogicEvent(force_planning=True)
 
         except Exception as e:
             logger.error(f"❌ Error during DroidAgent execution: {e}")
@@ -315,7 +323,7 @@ A wrapper class that coordinates between PlannerAgent (creates plans) and
             if ev.reflection:
                 handler = planner_agent.run(remembered_info=self.tools_instance.memory, reflection=ev.reflection)
             else:
-                if self.task_iter:
+                if not ev.force_planning and self.task_iter:
                     try:
                         task = next(self.task_iter)
                         return CodeActExecuteEvent(task=task, reflection=None)

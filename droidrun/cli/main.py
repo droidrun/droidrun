@@ -22,6 +22,8 @@ from droidrun.portal import (
     enable_portal_accessibility,
     PORTAL_PACKAGE_NAME,
     ping_portal,
+    ping_portal_tcp,
+    ping_portal_content,
 )
 from droidrun.macro.cli import macro_cli
 
@@ -78,7 +80,7 @@ async def run_command(
     reasoning: bool,
     reflection: bool,
     tracing: bool,
-    debug: bool, 
+    debug: bool,
     use_tcp: bool,
     save_trajectory: str = "none",
     ios: bool = False,
@@ -104,7 +106,7 @@ async def run_command(
             # Device setup
             if device is None and not ios:
                 logger.info("🔍 Finding connected device...")
-                
+
                 devices = adb.list()
                 if not devices:
                     raise ValueError("No connected devices found.")
@@ -117,10 +119,14 @@ async def run_command(
             else:
                 logger.info(f"📱 Using device: {device}")
 
-            tools = AdbTools(serial=device, use_tcp=use_tcp) if not ios else IOSTools(url=device)
+            tools = (
+                AdbTools(serial=device, use_tcp=use_tcp)
+                if not ios
+                else IOSTools(url=device)
+            )
             # Set excluded tools based on CLI flags
             excluded_tools = [] if allow_drag else ["drag"]
-            
+
             # Select personas based on --drag flag
             personas = [BIG_AGENT] if allow_drag else [DEFAULT]
 
@@ -143,7 +149,6 @@ async def run_command(
 
             if tracing:
                 logger.info("🔍 Tracing enabled")
-
 
             droid_agent = DroidAgent(
                 goal=command,
@@ -254,7 +259,10 @@ class DroidRunCLI(click.Group):
     "--debug", is_flag=True, help="Enable verbose debug logging", default=False
 )
 @click.option(
-    "--use-tcp", is_flag=True, help="Use TCP communication for device control", default=False
+    "--use-tcp",
+    is_flag=True,
+    help="Use TCP communication for device control",
+    default=False,
 )
 @click.option(
     "--save-trajectory",
@@ -333,7 +341,10 @@ def cli(
     "--debug", is_flag=True, help="Enable verbose debug logging", default=False
 )
 @click.option(
-    "--use-tcp", is_flag=True, help="Use TCP communication for device control", default=False
+    "--use-tcp",
+    is_flag=True,
+    help="Use TCP communication for device control",
+    default=False,
 )
 @click.option(
     "--save-trajectory",
@@ -437,7 +448,11 @@ def disconnect(serial: str):
 
 @cli.command()
 @click.option("--device", "-d", help="Device serial number or IP address", default=None)
-@click.option("--path", help="Path to the Droidrun Portal APK to install on the device. If not provided, the latest portal apk version will be downloaded and installed.", default=None)
+@click.option(
+    "--path",
+    help="Path to the Droidrun Portal APK to install on the device. If not provided, the latest portal apk version will be downloaded and installed.",
+    default=None,
+)
 @click.option(
     "--debug", is_flag=True, help="Enable verbose debug logging", default=False
 )
@@ -474,7 +489,9 @@ def setup(path: str | None, device: str | None, debug: bool):
 
             console.print(f"[bold blue]Step 1/2: Installing APK:[/] {apk_path}")
             try:
-                device_obj.install(apk_path, uninstall=True, flags=["-g"], silent=not debug)
+                device_obj.install(
+                    apk_path, uninstall=True, flags=["-g"], silent=not debug
+                )
             except Exception as e:
                 console.print(f"[bold red]Installation failed:[/] {e}")
                 return
@@ -499,9 +516,7 @@ def setup(path: str | None, device: str | None, debug: bool):
                     "[yellow]Opening accessibility settings for manual configuration...[/]"
                 )
 
-                device_obj.shell(
-                    "am start -a android.settings.ACCESSIBILITY_SETTINGS"
-                )
+                device_obj.shell("am start -a android.settings.ACCESSIBILITY_SETTINGS")
 
                 console.print(
                     "\n[yellow]Please complete the following steps on your device:[/]"
@@ -531,9 +546,15 @@ def setup(path: str | None, device: str | None, debug: bool):
 @cli.command()
 @click.option("--device", "-d", help="Device serial number or IP address", default=None)
 @click.option(
+    "--use-tcp",
+    is_flag=True,
+    help="Use TCP communication for device control",
+    default=False,
+)
+@click.option(
     "--debug", is_flag=True, help="Enable verbose debug logging", default=False
 )
-def ping(device: str | None, debug: bool):
+def ping(device: str | None, use_tcp: bool, debug: bool):
     """Ping a device to check if it is ready and accessible."""
     try:
         device_obj = adb.device(device)
@@ -542,6 +563,12 @@ def ping(device: str | None, debug: bool):
             return
 
         ping_portal(device_obj, debug)
+
+        if use_tcp:
+            ping_portal_tcp(device_obj, debug)
+        else:
+            ping_portal_content(device_obj, debug)
+
         console.print(
             "[bold green]Portal is installed and accessible. You're good to go![/]"
         )

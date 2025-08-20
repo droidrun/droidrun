@@ -13,6 +13,7 @@ class CodeActResultEvent(Event):
 
 class ReasoningLogicEvent(Event):
     reflection: Optional[Reflection] = None
+    force_planning: bool = False
 
 class FinalizeEvent(Event):
     success: bool

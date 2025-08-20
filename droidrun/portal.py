@@ -3,6 +3,8 @@ import tempfile
 import os
 import contextlib
 from adbutils import adb, AdbDevice
+from droidrun.tools import AdbTools
+from rich.console import Console
 
 REPO = "droidrun/droidrun-portal"
 ASSET_NAME = "droidrun-portal"
@@ -36,8 +38,10 @@ def get_latest_release_assets(debug: bool = False):
 
 @contextlib.contextmanager
 def download_portal_apk(debug: bool = False):
+    console = Console()
     assets = get_latest_release_assets(debug)
 
+    asset_version = None
     asset_url = None
     for asset in assets:
         if (
@@ -46,11 +50,15 @@ def download_portal_apk(debug: bool = False):
             and asset["name"].startswith(ASSET_NAME)
         ):
             asset_url = asset["browser_download_url"]
+            asset_version = asset["name"].split("-")[-1]
+            asset_version = asset_version.removesuffix(".apk")
             break
         elif "downloadUrl" in asset and os.path.basename(
             asset["downloadUrl"]
         ).startswith(ASSET_NAME):
             asset_url = asset["downloadUrl"]
+            asset_version: str = asset["name"].split("-")[-1]
+            asset_version = asset_version.removesuffix(".apk")
             break
         else:
             if debug:
@@ -58,6 +66,10 @@ def download_portal_apk(debug: bool = False):
 
     if not asset_url:
         raise Exception(f"Asset named '{ASSET_NAME}' not found in the latest release.")
+
+    console.print(f"Found Portal APK [bold]{asset_version}[/bold]")
+    if debug:
+        console.print(f"Asset URL: {asset_url}")
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".apk")
     try:
@@ -73,18 +85,18 @@ def download_portal_apk(debug: bool = False):
             os.unlink(tmp.name)
 
 
-def enable_portal_accessibility(device: AdbDevice):
-    device.shell(
-        f"settings put secure enabled_accessibility_services {A11Y_SERVICE_NAME}"
-    )
+def enable_portal_accessibility(
+    device: AdbDevice, service_name: str = A11Y_SERVICE_NAME
+):
+    device.shell(f"settings put secure enabled_accessibility_services {service_name}")
     device.shell("settings put secure accessibility_enabled 1")
 
 
-def check_portal_accessibility(device: AdbDevice, debug: bool = False) -> bool:
-    a11y_services = device.shell(
-        "settings get secure enabled_accessibility_services"
-    )
-    if not A11Y_SERVICE_NAME in a11y_services:
+def check_portal_accessibility(
+    device: AdbDevice, service_name: str = A11Y_SERVICE_NAME, debug: bool = False
+) -> bool:
+    a11y_services = device.shell("settings get secure enabled_accessibility_services")
+    if not service_name in a11y_services:
         if debug:
             print(a11y_services)
         return False
@@ -112,21 +124,38 @@ def ping_portal(device: AdbDevice, debug: bool = False):
             print(packages)
         raise Exception("Portal is not installed on the device")
 
-    if not check_portal_accessibility(device, debug):
+    if not check_portal_accessibility(device, debug=debug):
         device.shell("am start -a android.settings.ACCESSIBILITY_SETTINGS")
         raise Exception(
             "Droidrun Portal is not enabled as an accessibility service on the device"
         )
 
+
+def ping_portal_content(device: AdbDevice, debug: bool = False):
     try:
-        state = device.shell(
-            "content query --uri content://com.droidrun.portal/state"
-        )
+        state = device.shell("content query --uri content://com.droidrun.portal/state")
         if not "Row: 0 result=" in state:
             raise Exception("Failed to get state from Droidrun Portal")
-
     except Exception as e:
         raise Exception(f"Droidrun Portal is not reachable: {e}")
+
+
+def ping_portal_tcp(device: AdbDevice, debug: bool = False):
+    try:
+        tools = AdbTools(serial=device.serial, use_tcp=True)
+    except Exception as e:
+        raise Exception(f"Failed to setup TCP forwarding: {e}")
+
+
+def set_overlay_offset(device: AdbDevice, offset: int):
+    """
+    Set the overlay offset using the /overlay_offset portal content provider endpoint.
+    """
+    try:
+        cmd = f'content insert --uri "content://com.droidrun.portal/overlay_offset" --bind offset:i:{offset}'
+        device.shell(cmd)
+    except Exception as e:
+        raise Exception(f"Error setting overlay offset: {str(e)}")
 
 
 def test():

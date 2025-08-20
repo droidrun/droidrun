@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dataclasses import dataclass
 import copy
 
@@ -11,6 +11,9 @@ class Task:
     description: str
     status: str
     agent_type: str
+    # Optional fields to carry success/failure context back to the planner
+    message: Optional[str] = None
+    failure_reason: Optional[str] = None
     
 
 class TaskManager:
@@ -40,14 +43,23 @@ class TaskManager:
     def get_task_history(self):
         return self.task_history
 
-    def complete_task(self, task: Task):
+    def get_current_task(self) -> Optional[Task]:
+        """Return the first task with status "pending" from the task list."""
+        for task in self.tasks:
+            if task.status == self.STATUS_PENDING:
+                return task
+        return None
+
+    def complete_task(self, task: Task, message: Optional[str] = None):
         task = copy.deepcopy(task)
         task.status = self.STATUS_COMPLETED
+        task.message = message
         self.task_history.append(task)
 
-    def fail_task(self, task: Task):
+    def fail_task(self, task: Task, failure_reason: Optional[str] = None):
         task = copy.deepcopy(task)
         task.status = self.STATUS_FAILED
+        task.failure_reason = failure_reason
         self.task_history.append(task)
 
     def get_completed_tasks(self) -> list[dict]:
@@ -55,6 +67,9 @@ class TaskManager:
 
     def get_failed_tasks(self) -> list[dict]:
         return [task for task in self.task_history if task.status == self.STATUS_FAILED]
+    
+    def get_task_history(self) -> list[dict]:
+        return self.task_history
 
 
     def save_to_file(self):
