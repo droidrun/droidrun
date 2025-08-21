@@ -8,6 +8,7 @@ class EpisodicMemoryStep:
     response: str
     timestamp: float
     screenshot: Optional[bytes]
+    tokens: Optional[dict] = None
 
 @dataclass 
 class EpisodicMemory:

@@ -197,7 +197,7 @@ class CodeActAgent(Workflow):
                     chat_history,
                 )
 
-        response = await self._get_llm_response(ctx, chat_history)
+        response, tokens = await self._get_llm_response(ctx, chat_history)
         if response is None:
             return TaskEndEvent(
                 success=False, reason="LLM response is None. This is a critical error."
@@ -207,7 +207,7 @@ class CodeActAgent(Workflow):
 
         code, thoughts = chat_utils.extract_code_and_thought(response.message.content)
 
-        event = TaskThinkingEvent(thoughts=thoughts, code=code)
+        event = TaskThinkingEvent(thoughts=thoughts, code=code, tokens=tokens)
         ctx.write_event_to_stream(event)
         return event
 
@@ -337,13 +337,29 @@ class CodeActAgent(Workflow):
 
     async def _get_llm_response(
         self, ctx: Context, chat_history: List[ChatMessage]
-    ) -> ChatResponse | None:
+    ) -> Tuple[ChatResponse | None, dict | None]:
         logger.debug("🔍 Getting LLM response...")
         messages_to_send = [self.system_prompt] + chat_history
         messages_to_send = [chat_utils.message_copy(msg) for msg in messages_to_send]
         try:
             response = await self.llm.achat(messages=messages_to_send)
             logger.debug("🔍 Received LLM response.")
+
+            tokens = None
+            if response.raw and "usage" in response.raw:
+                usage = response.raw["usage"]
+                tokens = {
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
+                }
+            elif response.additional_kwargs and "usage" in response.additional_kwargs:
+                usage = response.additional_kwargs["usage"]
+                tokens = {
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
+                }
 
             filtered_chat_history = []
             for msg in chat_history:
@@ -371,7 +387,8 @@ class CodeActAgent(Workflow):
                 chat_history=chat_history_str,
                 response=response_str,
                 timestamp=time.time(),
-                screenshot=(await ctx.get("screenshot", None))
+                screenshot=(await ctx.get("screenshot", None)),
+                tokens=tokens,
             )
 
             self.episodic_memory.steps.append(step)
@@ -399,7 +416,7 @@ class CodeActAgent(Workflow):
                 logger.error(f"Could not get an answer from LLM: {repr(e)}")
                 raise e
         logger.debug("  - Received response from LLM.")
-        return response
+        return response, tokens
 
     async def _add_final_state_observation(self, ctx: Context) -> None:
         """Add the current UI state and screenshot as the final observation step."""
