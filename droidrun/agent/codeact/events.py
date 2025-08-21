@@ -11,6 +11,7 @@ class TaskInputEvent(Event):
 class TaskThinkingEvent(Event):
     thoughts: Optional[str] = None
     code: Optional[str] = None  
+    tokens: Optional[dict] = None
 
 class TaskExecutionEvent(Event):
     code: str
