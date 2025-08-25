@@ -100,7 +100,7 @@ async def run_command(
             # Device setup
             if device is None and not ios:
                 logger.info("🔍 Finding connected device...")
-                
+
                 devices = adb.list()
                 if not devices:
                     raise ValueError("No connected devices found.")
@@ -407,7 +407,11 @@ def disconnect(serial: str):
 
 @cli.command()
 @click.option("--device", "-d", help="Device serial number or IP address", default=None)
-@click.option("--path", help="Path to the Droidrun Portal APK to install on the device. If not provided, the latest portal apk version will be downloaded and installed.", default=None)
+@click.option(
+    "--path",
+    help="Path to the Droidrun Portal APK to install on the device. If not provided, the latest portal apk version will be downloaded and installed.",
+    default=None,
+)
 @click.option(
     "--debug", is_flag=True, help="Enable verbose debug logging", default=False
 )
@@ -469,9 +473,7 @@ def setup(path: str | None, device: str | None, debug: bool):
                     "[yellow]Opening accessibility settings for manual configuration...[/]"
                 )
 
-                device_obj.shell(
-                    "am start -a android.settings.ACCESSIBILITY_SETTINGS"
-                )
+                device_obj.shell("am start -a android.settings.ACCESSIBILITY_SETTINGS")
 
                 console.print(
                     "\n[yellow]Please complete the following steps on your device:[/]"
@@ -539,6 +541,7 @@ if __name__ == "__main__":
     base_url = None
     api_base = None
     ios = False
+    save_trajectory = True
     run_command(
         command=command,
         device=device,
@@ -555,4 +558,5 @@ if __name__ == "__main__":
         api_base=api_base,
         api_key=api_key,
         ios=ios,
+        save_trajectory=save_trajectory,
     )

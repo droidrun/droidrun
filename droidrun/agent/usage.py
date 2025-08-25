@@ -8,7 +8,14 @@ from uuid import uuid4
 import logging
 
 logger = logging.getLogger("droidrun")
-SUPPORTED_PROVIDERS = ["Gemini", "GoogleGenAI", "OpenAI", "Anthropic"]
+SUPPORTED_PROVIDERS = [
+    "Gemini",
+    "GoogleGenAI",
+    "OpenAI",
+    "Anthropic",
+    "Ollama",
+    "DeepSeek",
+]
 
 
 class UsageResult(BaseModel):
@@ -79,6 +86,27 @@ class TokenCountingHandler(BaseCallbackHandler):
                 request_tokens=usage.input_tokens,
                 response_tokens=usage.output_tokens,
                 total_tokens=usage.input_tokens + usage.output_tokens,
+                requests=1,
+            )
+        elif self.provider == "Ollama":
+            # Ollama response format uses different field names
+            prompt_eval_count = rsp.get("prompt_eval_count", 0)
+            eval_count = rsp.get("eval_count", 0)
+            return UsageResult(
+                request_tokens=prompt_eval_count,
+                response_tokens=eval_count,
+                total_tokens=prompt_eval_count + eval_count,
+                requests=1,
+            )
+        elif self.provider == "DeepSeek":
+            # DeepSeek follows OpenAI-compatible format
+            usage = rsp.usage
+            if not usage:
+                usage = {}
+            return UsageResult(
+                request_tokens=usage.prompt_tokens or 0,
+                response_tokens=usage.completion_tokens or 0,
+                total_tokens=usage.total_tokens or 0,
                 requests=1,
             )
 

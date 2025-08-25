@@ -130,6 +130,11 @@ if __name__ == "__main__":
             "name": "OpenAI",
             "model": "gpt-4",
         },
+        {
+            "name": "Ollama",
+            "model": "llama3.2:1b",
+            "base_url": "http://localhost:11434",
+        },
     ]
 
     system_prompt = ChatMessage(
@@ -149,7 +154,9 @@ if __name__ == "__main__":
         print("-" * 100)
 
         try:
-            llm = load_llm(provider["name"], model=provider["model"])
+            provider_name = provider.pop("name")
+            llm = load_llm(provider_name, **provider)
+            provider["name"] = provider_name
             print(f"Loaded LLM: {type(llm)}")
             print(f"Model: {llm.metadata}")
             print("-" * 100)
