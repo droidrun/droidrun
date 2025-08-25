@@ -4,7 +4,7 @@ to achieve a user's goal on an Android device.
 """
 
 import logging
-from typing import List, Optional, Type
+from typing import List
 
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import step, StartEvent, StopEvent, Workflow, Context
@@ -29,10 +29,6 @@ from droidrun.telemetry import (
     DroidAgentFinalizeEvent,
 )
 from droidrun.agent.usage import track_usage
-from droidrun.telemetry import capture, flush, DroidAgentInitEvent, DroidAgentFinalizeEvent
-from droidrun.agent.utils.structured_output import coerce_to_model, schema_instruction
-from pydantic import BaseModel
-
 
 logger = logging.getLogger("droidrun")
 
@@ -53,7 +49,6 @@ class DroidAgent(Workflow):
         if not logger.handlers:
             # Create a console handler
             handler = logging.StreamHandler()
-
 
             # Set format
             if debug:
@@ -95,7 +90,6 @@ class DroidAgent(Workflow):
             max_steps: Maximum number of steps for both agents
             timeout: Timeout for agent execution in seconds
             reasoning: Whether to use the PlannerAgent for complex reasoning (True)
-            reasoning: Whether to use the PlannerAgent for complex reasoning (True)
                       or send tasks directly to CodeActAgent (False)
             reflection: Whether to reflect on steps the CodeActAgent did to give the PlannerAgent advice
             enable_tracing: Whether to enable Arize Phoenix tracing
@@ -110,7 +104,6 @@ class DroidAgent(Workflow):
         super().__init__(timeout=timeout, *args, **kwargs)
         # Configure default logging if not already configured
         self._configure_default_logging(debug=debug)
-
 
         # Setup global tracing first if enabled
         if enable_tracing:
@@ -147,9 +140,6 @@ class DroidAgent(Workflow):
                 self.save_trajectories = save_trajectories
         
         self.trajectory = Trajectory(goal=goal)
-        self.save_trajectories = save_trajectories
-
-        self.trajectory = Trajectory()
         self.task_manager = TaskManager()
         self.task_iter = None
 
@@ -163,17 +153,10 @@ class DroidAgent(Workflow):
         self.response_tokens = self.token_tracker.usage.response_tokens  # 0 initially
         self.total_tokens = self.token_tracker.usage.total_tokens  # 0 initially
 
-        self._output_schema: Optional[Type[BaseModel]] = None
-        # Persist last structured payload observed from CodeAct to support reasoning mode
-        self._last_structured_output: Optional[dict] = None
-
         logger.info("🤖 Initializing DroidAgent...")
-
         logger.info(f"💾 Trajectory saving level: {self.save_trajectories}")
         
         self.tool_list = describe_tools(tools, excluded_tools)
-
-        self.tool_list = describe_tools(tools)
         self.tools_instance = tools
         
         self.tools_instance.save_trajectories = self.save_trajectories
@@ -195,7 +178,6 @@ class DroidAgent(Workflow):
 
             if self.reflection:
                 self.reflector = Reflector(llm=llm, debug=debug)
-
 
         else:
             logger.debug(
@@ -221,7 +203,6 @@ class DroidAgent(Workflow):
             self.user_id,
         )
 
-
         logger.info("✅ DroidAgent initialized successfully.")
 
     def run(self, *args, **kwargs) -> WorkflowHandler:
@@ -229,6 +210,9 @@ class DroidAgent(Workflow):
         Run the DroidAgent workflow.
         """
         return super().run(*args, **kwargs)
+    
+        return super().run()
+
 
     def set_output_schema(self, schema: Type[BaseModel]) -> None:
         """Set a Pydantic schema for structured output.
@@ -274,10 +258,8 @@ class DroidAgent(Workflow):
         """
         Execute a single task using the CodeActAgent.
 
-
         Args:
             task: Task dictionary with description and status
-
 
         Returns:
             Tuple of (success, reason)
@@ -289,11 +271,6 @@ class DroidAgent(Workflow):
         logger.info(f"🔧 Executing task: {task.description}")
 
         try:
-            # Build safe instruction string: if downstream uses str.format(), raw braces cause errors.
-            instr = self.get_output_schema_instruction()
-            if isinstance(instr, str):
-                instr = instr.replace("{", "{{").replace("}", "}}")
-
             codeact_agent = CodeActAgent(
                 llm=self.llm,
                 persona=persona,
@@ -303,7 +280,6 @@ class DroidAgent(Workflow):
                 tools_instance=self.tools_instance,
                 debug=self.debug,
                 timeout=self.timeout,
-                output_schema_instruction=instr,
             )
 
             handler = codeact_agent.run(
@@ -312,61 +288,44 @@ class DroidAgent(Workflow):
                 reflection=reflection,
             )
 
-
             async for nested_ev in handler.stream_events():
                 self.handle_stream_event(nested_ev, ctx)
 
             result = await handler
 
-            
             if "success" in result and result["success"]:
                 return CodeActResultEvent(
                     success=True,
                     reason=result["reason"],
-                    output=result.get("output"),
                     task=task,
-                    steps=len(result.get("codeact_steps", [])),
+                    steps=result["codeact_steps"],
                 )
             else:
                 return CodeActResultEvent(
                     success=False,
                     reason=result["reason"],
-                    output=result.get("output"),
                     task=task,
-                    steps=len(result.get("codeact_steps", [])),
+                    steps=result["codeact_steps"],
                 )
 
         except Exception as e:
             logger.error(f"Error during task execution: {e}")
             if self.debug:
                 import traceback
+
                 logger.error(traceback.format_exc())
-            err = f"Error: {str(e)}"
-            return CodeActResultEvent(success=False, reason=err, output=err, task=task, steps=0)
+            return CodeActResultEvent(
+                success=False, reason=f"Error: {str(e)}", task=task, steps=[]
+            )
 
     @step
-    async def handle_codeact_execute(
-        self, ctx: Context, ev: CodeActResultEvent
-    ) -> FinalizeEvent | ReflectionEvent:
+    async def handle_codeact_execute(self, ctx: Context, ev: CodeActResultEvent) -> FinalizeEvent | ReflectionEvent | ReasoningLogicEvent:
         try:
             task = ev.task
-            # Persist structured payload if present to survive reasoning loops
-            if isinstance(ev.output, dict):
-                self._last_structured_output = ev.output
             if not self.reasoning:
-                return FinalizeEvent(success=ev.success, reason=ev.reason, output=ev.output if ev.output is not None else ev.reason, task=[task], tasks=[task], steps=ev.steps)
+                return FinalizeEvent(success=ev.success, reason=ev.reason, output=ev.reason, task=[task], tasks=[task], steps=ev.steps)
             
             if self.reflection and ev.success:
-                return FinalizeEvent(
-                    success=ev.success,
-                    reason=ev.reason,
-                    output=ev.reason,
-                    task=[task],
-                    tasks=[task],
-                    steps=ev.steps,
-                )
-
-            if self.reflection:
                 return ReflectionEvent(task=task)
 
             # Reasoning is enabled but reflection is disabled.
@@ -379,13 +338,10 @@ class DroidAgent(Workflow):
                 self.task_manager.fail_task(task, failure_reason=ev.reason)
                 return ReasoningLogicEvent(force_planning=True)
 
-            return ReasoningLogicEvent()
-
         except Exception as e:
             logger.error(f"❌ Error during DroidAgent execution: {e}")
             if self.debug:
                 import traceback
-
 
                 logger.error(traceback.format_exc())
             tasks = self.task_manager.get_task_history()
@@ -415,7 +371,6 @@ class DroidAgent(Workflow):
         if reflection.goal_achieved:
             self.task_manager.complete_task(task)
             return ReasoningLogicEvent()
-
 
         else:
             self.task_manager.fail_task(task)
@@ -494,12 +449,10 @@ class DroidAgent(Workflow):
 
             return CodeActExecuteEvent(task=next(self.task_iter), reflection=None)
 
-
         except Exception as e:
             logger.error(f"❌ Error during DroidAgent execution: {e}")
             if self.debug:
                 import traceback
-
 
                 logger.error(traceback.format_exc())
             tasks = self.task_manager.get_task_history()
@@ -511,25 +464,13 @@ class DroidAgent(Workflow):
                 tasks=tasks,
                 steps=self.step_counter,
             )
-            return FinalizeEvent(
-                success=False,
-                reason=str(e),
-                output=str(e),
-                task=tasks,
-                tasks=tasks,
-                steps=self.step_counter,
-            )
 
     @step
     async def start_handler(
         self, ctx: Context, ev: StartEvent
     ) -> CodeActExecuteEvent | ReasoningLogicEvent:
-    async def start_handler(
-        self, ctx: Context, ev: StartEvent
-    ) -> CodeActExecuteEvent | ReasoningLogicEvent:
         """
         Main execution loop that coordinates between planning and execution.
-
 
         Returns:
             Dict containing the execution result
@@ -537,10 +478,8 @@ class DroidAgent(Workflow):
         logger.info(f"🚀 Running DroidAgent to achieve goal: {self.goal}")
         ctx.write_event_to_stream(ev)
 
-
         self.step_counter = 0
         self.retry_counter = 0
-
 
         if not self.reasoning:
             logger.info(f"🔄 Direct execution mode - executing goal: {self.goal}")
@@ -548,15 +487,11 @@ class DroidAgent(Workflow):
                 description=self.goal,
                 status=self.task_manager.STATUS_PENDING,
                 agent_type="Default",
-                agent_type="Default",
             )
-
 
             return CodeActExecuteEvent(task=task, reflection=None)
 
-
         return ReasoningLogicEvent()
-
 
     @step
     async def finalize(self, ctx: Context, ev: FinalizeEvent) -> StopEvent:
@@ -568,7 +503,6 @@ class DroidAgent(Workflow):
                 output=ev.output,
                 steps=ev.steps,
             ),
-            self.user_id,
             self.user_id,
         )
         flush()
@@ -584,18 +518,7 @@ class DroidAgent(Workflow):
         if self.trajectory and self.save_trajectories != "none":
             self.trajectory.save_trajectory()
 
-        # Return structured output if schema is configured and validation succeeds
-        structured = None
-        candidate_output = ev.output
-        # If ev.output is not a dict (common in reasoning mode), try last structured payload
-        if not isinstance(candidate_output, dict) and isinstance(self._last_structured_output, dict):
-            candidate_output = self._last_structured_output
-        if isinstance(candidate_output, dict):
-            structured = self._build_structured_output(candidate_output)
-        if structured is not None:
-            return StopEvent(structured)
         return StopEvent(result)
-
 
     def handle_stream_event(self, ev: Event, ctx: Context):
 
@@ -607,7 +530,6 @@ class DroidAgent(Workflow):
 
         if not isinstance(ev, StopEvent):
             ctx.write_event_to_stream(ev)
-
 
             if isinstance(ev, ScreenshotEvent):
                 self.trajectory.screenshots.append(ev.screenshot)
