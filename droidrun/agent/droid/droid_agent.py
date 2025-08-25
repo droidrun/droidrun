@@ -140,6 +140,9 @@ class DroidAgent(Workflow):
                 self.save_trajectories = save_trajectories
         
         self.trajectory = Trajectory(goal=goal)
+        self.save_trajectories = save_trajectories
+
+        self.trajectory = Trajectory()
         self.task_manager = TaskManager()
         self.task_iter = None
 
@@ -157,6 +160,8 @@ class DroidAgent(Workflow):
         logger.info(f"💾 Trajectory saving level: {self.save_trajectories}")
         
         self.tool_list = describe_tools(tools, excluded_tools)
+
+        self.tool_list = describe_tools(tools)
         self.tools_instance = tools
         
         self.tools_instance.save_trajectories = self.save_trajectories
@@ -211,6 +216,8 @@ class DroidAgent(Workflow):
         """
         return super().run(*args, **kwargs)
     
+        return super().run()
+
     @step
     async def execute_task(
         self, ctx: Context, ev: CodeActExecuteEvent
@@ -280,12 +287,25 @@ class DroidAgent(Workflow):
 
     @step
     async def handle_codeact_execute(self, ctx: Context, ev: CodeActResultEvent) -> FinalizeEvent | ReflectionEvent | ReasoningLogicEvent:
+    async def handle_codeact_execute(
+        self, ctx: Context, ev: CodeActResultEvent
+    ) -> FinalizeEvent | ReflectionEvent:
         try:
             task = ev.task
             if not self.reasoning:
                 return FinalizeEvent(success=ev.success, reason=ev.reason, output=ev.reason, task=[task], tasks=[task], steps=ev.steps)
             
             if self.reflection and ev.success:
+                return FinalizeEvent(
+                    success=ev.success,
+                    reason=ev.reason,
+                    output=ev.reason,
+                    task=[task],
+                    tasks=[task],
+                    steps=ev.steps,
+                )
+
+            if self.reflection:
                 return ReflectionEvent(task=task)
 
             # Reasoning is enabled but reflection is disabled.
@@ -297,6 +317,8 @@ class DroidAgent(Workflow):
             else:
                 self.task_manager.fail_task(task, failure_reason=ev.reason)
                 return ReasoningLogicEvent(force_planning=True)
+
+            return ReasoningLogicEvent()
 
         except Exception as e:
             logger.error(f"❌ Error during DroidAgent execution: {e}")
