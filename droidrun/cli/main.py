@@ -601,7 +601,6 @@ if __name__ == "__main__":
     base_url = None
     api_base = None
     ios = False
-    save_trajectory = True
     save_trajectory = "action"
     allow_drag = False
     run_command(
