@@ -111,41 +111,16 @@ class Trajectory:
         return gif_path
 
     def get_trajectory(self) -> List[Dict[str, Any]]:
-        # Save main trajectory events
-class Trajectory:
-
-    def __init__(self):
-        """Initializes an empty trajectory class."""
-        self.events: List[Event] = []
-        self.screenshots: List[bytes] = []
-
-    def create_screenshot_gif(self, output_path: str, duration: int = 1000) -> str:
-        """
-        Create a GIF from a list of screenshots.
-
-        Args:
-            output_path: Base path for the GIF (without extension)
-            duration: Duration for each frame in milliseconds
-
-        Returns:
-            Path to the created GIF file
-        """
-        if len(self.screenshots) == 0:
-            return None
-
-        images = []
-        for screenshot in self.screenshots:
-            img_data = screenshot
-            img = Image.open(io.BytesIO(img_data))
-            images.append(img)
-
-        # Save as GIF
-        gif_path = f"{output_path}.gif"
-        images[0].save(
-            gif_path, save_all=True, append_images=images[1:], duration=duration, loop=0
-        )
-
-        return gif_path
+        """Return a JSON-serializable list of trajectory events."""
+        serializable_events: List[Dict[str, Any]] = []
+        for event in self.events:
+            try:
+                data = {k: make_serializable(v) for k, v in event.__dict__.items() if not k.startswith("_")}
+            except Exception:
+                data = {}
+            data["type"] = event.__class__.__name__
+            serializable_events.append(data)
+        return serializable_events
 
     def save_trajectory(
         self,
@@ -321,9 +296,6 @@ class Trajectory:
 
         trajectory_json_path = os.path.join(trajectory_folder, "trajectory.json")
         with open(trajectory_json_path, "w") as f:
-
-        json_path = f"{base_path}.json"
-        with open(json_path, "w") as f:
             json.dump(serializable_events, f, indent=2)
 
         # Save macro sequence as a separate file for replay
@@ -474,7 +446,7 @@ class Trajectory:
         actions = macro_data["actions"]
 
         # Count action types
-        action_types = {}
+        action_types: Dict[str, int] = {}
         for action in actions:
             action_type = action.get("action_type", "unknown")
             action_types[action_type] = action_types.get(action_type, 0) + 1
@@ -485,41 +457,6 @@ class Trajectory:
         ]
         duration = max(timestamps) - min(timestamps) if len(timestamps) > 1 else 0
 
-            Dictionary with statistics about the trajectory
-        """
-        trajectory_steps = trajectory_data.get("trajectory_steps", [])
-
-        # Count different types of steps
-        step_types = {}
-        for step in trajectory_steps:
-            step_type = step.get("type", "unknown")
-            step_types[step_type] = step_types.get(step_type, 0) + 1
-
-        # Count planning vs execution steps
-        planning_steps = sum(
-            count
-            for step_type, count in step_types.items()
-            if step_type.startswith("planner_")
-        )
-        execution_steps = sum(
-            count
-            for step_type, count in step_types.items()
-            if step_type.startswith("codeact_")
-        )
-
-        # Count successful vs failed executions
-        successful_executions = sum(
-            1
-            for step in trajectory_steps
-            if step.get("type") == "codeact_execution" and step.get("success", False)
-        )
-        failed_executions = sum(
-            1
-            for step in trajectory_steps
-            if step.get("type") == "codeact_execution" and not step.get("success", True)
-        )
-
-        # Return statistics
         return {
             "version": macro_data.get("version", "unknown"),
             "description": macro_data.get("description", "No description"),
@@ -595,14 +532,6 @@ class Trajectory:
             print(f"Total events: {len(folder_data['trajectory_data'])}")
 
         print("=================================")
-            "total_steps": len(trajectory_steps),
-            "step_types": step_types,
-            "planning_steps": planning_steps,
-            "execution_steps": execution_steps,
-            "successful_executions": successful_executions,
-            "failed_executions": failed_executions,
-            "goal_achieved": trajectory_data.get("success", False),
-        }
 
     def print_trajectory_summary(self, trajectory_data: Dict[str, Any]) -> None:
         """
@@ -612,16 +541,19 @@ class Trajectory:
         Args:
             trajectory_data: The trajectory data dictionary
         """
-        stats = self.get_trajectory_statistics(trajectory_data)
-
+        # Accept either a list of steps or a dict with steps
+        steps = trajectory_data if isinstance(trajectory_data, list) else trajectory_data.get("trajectory_steps", [])
+        stats = get_trajectory_statistics(steps)
 
         print("=== Trajectory Summary ===")
-        print(f"Goal: {trajectory_data.get('goal', 'Unknown')}")
-        print(f"Success: {trajectory_data.get('success', False)}")
-        print(f"Reason: {trajectory_data.get('reason', 'Unknown')}")
+        goal = trajectory_data.get('goal', 'Unknown') if isinstance(trajectory_data, dict) else 'Unknown'
+        success = trajectory_data.get('success', False) if isinstance(trajectory_data, dict) else False
+        reason = trajectory_data.get('reason', 'Unknown') if isinstance(trajectory_data, dict) else 'Unknown'
+        print(f"Goal: {goal}")
+        print(f"Success: {success}")
+        print(f"Reason: {reason}")
         print(f"Total steps: {stats['total_steps']}")
         print("Step breakdown:")
-        for step_type, count in stats["step_types"].items():
         for step_type, count in stats["step_types"].items():
             print(f"  - {step_type}: {count}")
         print(f"Planning steps: {stats['planning_steps']}")
