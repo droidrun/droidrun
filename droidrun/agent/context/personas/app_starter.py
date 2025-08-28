@@ -9,6 +9,7 @@ APP_STARTER_EXPERT = AgentPersona(
     ],
     allowed_tools=[
         Tools.start_app.__name__,
+        Tools.set_output.__name__,
         Tools.complete.__name__
     ],
     required_context=[
@@ -38,6 +39,10 @@ APP_STARTER_EXPERT = AgentPersona(
     {tool_descriptions}
 
     Reminder: Always place your Python code between ```...``` tags when you want to run code. 
+
+    ## Structured Output Guidance
+    - If a structured output schema is configured, first call `set_output({...})` with a JSON object matching the schema, then call `complete(success, reason)` with a short human-readable reason.
+    - Do NOT place JSON in the `reason` string. `reason` is for human-readable summaries only.
 
     You focus ONLY on app launching and package management - UI interactions within apps are handled by UI specialists.""",
 

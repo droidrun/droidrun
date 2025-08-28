@@ -18,6 +18,7 @@ from llama_index.core.workflow import Event
 logger = logging.getLogger("droidrun")
 
 
+
 def make_serializable(obj):
     """Recursively make objects JSON serializable."""
     if hasattr(obj, "__class__") and obj.__class__.__name__ == "ChatMessage":
@@ -110,7 +111,75 @@ class Trajectory:
         return gif_path
 
     def get_trajectory(self) -> List[Dict[str, Any]]:
-        # Save main trajectory events
+        """Return a JSON-serializable list of trajectory events."""
+        serializable_events: List[Dict[str, Any]] = []
+        for event in self.events:
+            try:
+                data = {k: make_serializable(v) for k, v in event.__dict__.items() if not k.startswith("_")}
+            except Exception:
+                data = {}
+            data["type"] = event.__class__.__name__
+            serializable_events.append(data)
+        return serializable_events
+
+    def save_trajectory(
+        self,
+        directory: str = "trajectories",
+    ) -> str:
+        """
+        Save trajectory steps to a JSON file and create a GIF of screenshots if available.
+
+        Args:
+            directory: Directory to save the trajectory files
+
+        Returns:
+            Path to the saved trajectory file
+        """
+        os.makedirs(directory, exist_ok=True)
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        base_path = os.path.join(directory, f"trajectory_{timestamp}")
+
+        def make_serializable(obj):
+            """Recursively make objects JSON serializable."""
+            if hasattr(obj, "__class__") and obj.__class__.__name__ == "ChatMessage":
+                # Extract the text content from the ChatMessage
+                if hasattr(obj, "content") and obj.content is not None:
+                    return {"role": obj.role.value, "content": obj.content}
+                # If content is not available, try extracting from blocks
+                elif hasattr(obj, "blocks") and obj.blocks:
+                    text_content = ""
+                    for block in obj.blocks:
+                        if hasattr(block, "text"):
+                            text_content += block.text
+                    return {"role": obj.role.value, "content": text_content}
+                else:
+                    return str(obj)
+            elif isinstance(obj, dict):
+                return {k: make_serializable(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [make_serializable(item) for item in obj]
+            elif hasattr(obj, "__dict__"):
+                # Handle other custom objects by converting to dict
+                result = {}
+                for k, v in obj.__dict__.items():
+                    if not k.startswith("_"):
+                        try:
+                            result[k] = make_serializable(v)
+                        except (TypeError, ValueError) as e:
+                            # If serialization fails, convert to string representation
+                            logger.warning(f"Failed to serialize attribute {k}: {e}")
+                            result[k] = str(v)
+                return result
+            else:
+                try:
+                    # Test if the object is JSON serializable
+                    json.dumps(obj)
+                    return obj
+                except (TypeError, ValueError):
+                    # If not serializable, convert to string
+                    return str(obj)
+
         serializable_events = []
         for event in self.events:
             event_dict = {
@@ -121,6 +190,43 @@ class Trajectory:
                     if not k.startswith("_")
                 },
             }
+            # Debug: Check if tokens attribute exists
+            if hasattr(event, "tokens"):
+                logger.debug(
+                    f"Event {event.__class__.__name__} has tokens: {event.tokens}"
+                )
+            else:
+                logger.debug(
+                    f"Event {event.__class__.__name__} does NOT have tokens attribute"
+                )
+
+            # Start with the basic event structure
+            event_dict = {"type": event.__class__.__name__}
+
+            # Add all attributes from __dict__
+            for k, v in event.__dict__.items():
+                if not k.startswith("_"):
+                    try:
+                        event_dict[k] = make_serializable(v)
+                    except (TypeError, ValueError) as e:
+                        logger.warning(f"Failed to serialize attribute {k}: {e}")
+                        event_dict[k] = str(v)
+
+            # Explicitly check for and add tokens attribute if it exists
+            if hasattr(event, "tokens") and "tokens" not in event_dict:
+                logger.debug(
+                    f"Manually adding tokens attribute for {event.__class__.__name__}"
+                )
+                event_dict["tokens"] = make_serializable(event.tokens)
+
+            # Debug: Check if tokens is in the serialized event
+            if "tokens" in event_dict:
+                logger.debug(
+                    f"Serialized event contains tokens: {event_dict['tokens']}"
+                )
+            else:
+                logger.debug(f"Serialized event does NOT contain tokens")
+
             serializable_events.append(event_dict)
 
         return serializable_events
@@ -324,8 +430,12 @@ class Trajectory:
         """
         Get a summary of a macro sequence.
 
+        Get statistics about a trajectory.
+
         Args:
             macro_data: The macro data dictionary
+
+            trajectory_data: The trajectory data dictionary
 
         Returns:
             Dictionary with statistics about the macro
@@ -336,7 +446,7 @@ class Trajectory:
         actions = macro_data["actions"]
 
         # Count action types
-        action_types = {}
+        action_types: Dict[str, int] = {}
         for action in actions:
             action_type = action.get("action_type", "unknown")
             action_types[action_type] = action_types.get(action_type, 0) + 1
@@ -427,15 +537,21 @@ class Trajectory:
         """
         Print a summary of a trajectory.
 
+
         Args:
             trajectory_data: The trajectory data dictionary
         """
-        stats = self.get_trajectory_statistics(trajectory_data)
+        # Accept either a list of steps or a dict with steps
+        steps = trajectory_data if isinstance(trajectory_data, list) else trajectory_data.get("trajectory_steps", [])
+        stats = get_trajectory_statistics(steps)
 
         print("=== Trajectory Summary ===")
-        print(f"Goal: {trajectory_data.get('goal', 'Unknown')}")
-        print(f"Success: {trajectory_data.get('success', False)}")
-        print(f"Reason: {trajectory_data.get('reason', 'Unknown')}")
+        goal = trajectory_data.get('goal', 'Unknown') if isinstance(trajectory_data, dict) else 'Unknown'
+        success = trajectory_data.get('success', False) if isinstance(trajectory_data, dict) else False
+        reason = trajectory_data.get('reason', 'Unknown') if isinstance(trajectory_data, dict) else 'Unknown'
+        print(f"Goal: {goal}")
+        print(f"Success: {success}")
+        print(f"Reason: {reason}")
         print(f"Total steps: {stats['total_steps']}")
         print("Step breakdown:")
         for step_type, count in stats["step_types"].items():
@@ -531,3 +647,4 @@ Trajectory.print_macro_summary(folder_path)
 #     ├── macro.json          # Macro sequence with goal as description
 #     └── screenshots.gif     # Screenshot animation
 """
+

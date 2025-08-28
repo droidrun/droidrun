@@ -4,17 +4,22 @@ to achieve a user's goal on an Android device.
 """
 
 import logging
-from typing import List
+from typing import List, Optional, Type
 
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import step, StartEvent, StopEvent, Workflow, Context
 from llama_index.core.workflow.handler import WorkflowHandler
+from pydantic import BaseModel
 from droidrun.agent.droid.events import *
 from droidrun.agent.codeact import CodeActAgent
 from droidrun.agent.codeact.events import EpisodicMemoryEvent
 from droidrun.agent.planner import PlannerAgent
 from droidrun.agent.context.task_manager import TaskManager
 from droidrun.agent.utils.trajectory import Trajectory
+from droidrun.agent.utils.structured_output import (
+    coerce_to_model,
+    schema_instruction,
+)
 from droidrun.tools import Tools, describe_tools
 from droidrun.agent.common.events import ScreenshotEvent, MacroEvent, RecordUIStateEvent
 from droidrun.agent.common.default import MockWorkflow
@@ -210,7 +215,46 @@ class DroidAgent(Workflow):
         Run the DroidAgent workflow.
         """
         return super().run(*args, **kwargs)
-    
+
+
+
+    def set_output_schema(self, schema: Type[BaseModel]) -> None:
+        """Set a Pydantic schema for structured output.
+
+        When set, the agent will attempt to validate and return a model instance
+        from the final result instead of a plain dict.
+        """
+        self._output_schema = schema
+
+    def _build_structured_output(self, data: dict) -> Optional[BaseModel]:
+        """Build a structured output using the configured Pydantic schema (v2)."""
+        if not self._output_schema:
+            return None
+        try:
+            return coerce_to_model(self._output_schema, data)
+        except Exception as e:
+            logger.exception(
+                "Structured output validation failed: schema=%s, keys=%s, error=%s",
+                getattr(self._output_schema, "__name__", str(self._output_schema)),
+                sorted(list(data.keys())),
+                e,
+            )
+            return None
+
+    def get_output_schema_instruction(self) -> Optional[str]:
+        """Return a short instruction for LLM prompts based on the configured schema."""
+        if not self._output_schema:
+            return None
+        try:
+            return schema_instruction(self._output_schema)
+        except Exception as e:
+            logger.exception(
+                "Failed building schema instruction: schema=%s, error=%s",
+                getattr(self._output_schema, "__name__", str(self._output_schema)),
+                e,
+            )
+            return None
+
     @step
     async def execute_task(
         self, ctx: Context, ev: CodeActExecuteEvent
@@ -253,19 +297,24 @@ class DroidAgent(Workflow):
 
             result = await handler
 
+            # Carry structured output forward if provided by CodeActAgent
+            output_payload = result.get("output", result.get("reason"))
+
             if "success" in result and result["success"]:
                 return CodeActResultEvent(
                     success=True,
                     reason=result["reason"],
+                    output=output_payload,
                     task=task,
-                    steps=result["codeact_steps"],
+                    steps=len(result.get("codeact_steps", [])),  # Convert to integer
                 )
             else:
                 return CodeActResultEvent(
                     success=False,
-                    reason=result["reason"],
+                    reason=result.get("reason", ""),
+                    output=output_payload,
                     task=task,
-                    steps=result["codeact_steps"],
+                    steps=len(result.get("codeact_steps", [])),  # Convert to integer
                 )
 
         except Exception as e:
@@ -274,17 +323,46 @@ class DroidAgent(Workflow):
                 import traceback
 
                 logger.error(traceback.format_exc())
+            err = f"Error: {str(e)}"
             return CodeActResultEvent(
-                success=False, reason=f"Error: {str(e)}", task=task, steps=[]
+                success=False,
+                reason=err,
+                output=err,  # Required field
+                task=task,
+                steps=0  # Must be an integer
             )
 
     @step
     async def handle_codeact_execute(self, ctx: Context, ev: CodeActResultEvent) -> FinalizeEvent | ReflectionEvent | ReasoningLogicEvent:
         try:
             task = ev.task
-            if not self.reasoning:
-                return FinalizeEvent(success=ev.success, reason=ev.reason, output=ev.reason, task=[task], tasks=[task], steps=ev.steps)
             
+            # Store structured output if available
+            if isinstance(ev.output, dict):
+                self._last_structured_output = ev.output
+            
+            if not self.reasoning:
+                return FinalizeEvent(
+                    success=ev.success,
+                    reason=ev.reason,
+                    output=ev.output if getattr(ev, "output", None) is not None else ev.reason,
+                    task=[task],
+                    tasks=[task],
+                    steps=ev.steps,
+                )
+            
+            # If we have successful output in reasoning mode, finalize
+            if ev.success and hasattr(self, '_last_structured_output') and self._last_structured_output.get('success', False):
+                tasks = self.task_manager.get_task_history()
+                return FinalizeEvent(
+                    success=True,
+                    reason="Task completed successfully",
+                    output=self._last_structured_output,
+                    task=tasks,
+                    tasks=tasks,
+                    steps=ev.steps,
+                )
+                
             if self.reflection and ev.success:
                 return ReflectionEvent(task=task)
 
@@ -345,16 +423,35 @@ class DroidAgent(Workflow):
     ) -> FinalizeEvent | CodeActExecuteEvent:
         try:
             if self.step_counter >= self.max_steps:
-                output = f"Reached maximum number of steps ({self.max_steps})"
+                output = {
+                    "success": False,
+                    "output": f"Reached maximum number of steps ({self.max_steps})",
+                    "reason": f"Reached maximum number of steps ({self.max_steps})"
+                }
                 tasks = self.task_manager.get_task_history()
+                # Store structured output for schema validation
+                self._last_structured_output = output
                 return FinalizeEvent(
                     success=False,
-                    reason=output,
-                    output=output,
+                    reason=output["reason"],
+                    output=output,  # Pass structured output
                     task=tasks,
                     tasks=tasks,
                     steps=self.step_counter,
                 )
+            
+            # If we have a completed task with structured output, finalize
+            if hasattr(self, '_last_structured_output') and self._last_structured_output.get('success', False):
+                tasks = self.task_manager.get_task_history()
+                return FinalizeEvent(
+                    success=True,
+                    reason="Task completed successfully",
+                    output=self._last_structured_output,
+                    task=tasks,
+                    tasks=tasks,
+                    steps=self.step_counter,
+                )
+
             self.step_counter += 1
 
             if ev.reflection:
@@ -474,6 +571,23 @@ class DroidAgent(Workflow):
             "output": ev.output,
             "steps": ev.steps,
         }
+
+        # If a schema is configured, attempt to coerce structured output
+        if getattr(self, "_output_schema", None):
+            # Case 1: direct dict output from execution
+            if isinstance(ev.output, dict):
+                model = coerce_to_model(self._output_schema, ev.output)
+                if model is not None:
+                    if self.trajectory and self.save_trajectories != "none":
+                        self.trajectory.save_trajectory()
+                    return StopEvent(model)
+            # Case 2: reasoning-mode string output but we captured a structured payload earlier
+            if self.reasoning and hasattr(self, "_last_structured_output") and isinstance(self._last_structured_output, dict):
+                model = coerce_to_model(self._output_schema, self._last_structured_output)
+                if model is not None:
+                    if self.trajectory and self.save_trajectories != "none":
+                        self.trajectory.save_trajectory()
+                    return StopEvent(model)
 
         if self.trajectory and self.save_trajectories != "none":
             self.trajectory.save_trajectory()

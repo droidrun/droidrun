@@ -50,6 +50,7 @@ class CodeActAgent(Workflow):
         all_tools_list: Dict[str, Callable[..., Any]],
         max_steps: int = 5,
         debug: bool = False,
+        output_schema_instruction: Optional[str] = None,
         *args,
         **kwargs,
     ):
@@ -90,6 +91,15 @@ class CodeActAgent(Workflow):
         self.system_prompt = ChatMessage(
             role="system", content=self.system_prompt_content
         )
+        # Optional schema instruction prompt to nudge structured outputs
+        self.schema_prompt: Optional[ChatMessage] = None
+        if output_schema_instruction:
+            schema_content = (
+                "You must format your final outputs to match the following schema. "
+                "When returning any results, ensure they can be parsed as valid JSON for fields.\n"
+                f"{output_schema_instruction}"
+            )
+            self.schema_prompt = ChatMessage(role="system", content=schema_content)
 
         self.required_context = persona.required_context
 
@@ -318,16 +328,18 @@ class CodeActAgent(Workflow):
         # Add final state observation to episodic memory
         await self._add_final_state_observation(ctx)
         
-        result = {}
-        result.update(
-            {
-                "success": ev.success,
-                "reason": ev.reason,
-                "output": ev.reason,
-                "codeact_steps": self.steps_counter,
-                "code_executions": self.code_exec_counter,
-            }
-        )
+        # Prefer structured payload captured via tools.set_output()
+        output_payload = getattr(self.tools, "final_output", None)
+        if output_payload is None:
+            output_payload = ev.reason
+
+        result = {
+            "success": ev.success,
+            "reason": ev.reason,
+            "output": output_payload,
+            "codeact_steps": self.steps_counter,
+            "code_executions": self.code_exec_counter,
+        }
 
         ctx.write_event_to_stream(
             EpisodicMemoryEvent(episodic_memory=self.episodic_memory)
@@ -339,7 +351,10 @@ class CodeActAgent(Workflow):
         self, ctx: Context, chat_history: List[ChatMessage]
     ) -> ChatResponse | None:
         logger.debug("🔍 Getting LLM response...")
-        messages_to_send = [self.system_prompt] + chat_history
+        messages_to_send = [self.system_prompt]
+        if self.schema_prompt is not None:
+            messages_to_send.append(self.schema_prompt)
+        messages_to_send += chat_history
         messages_to_send = [chat_utils.message_copy(msg) for msg in messages_to_send]
         try:
             response = await self.llm.achat(messages=messages_to_send)

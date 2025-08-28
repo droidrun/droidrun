@@ -1,0 +1,196 @@
+# Structured Output (Pydantic v2)
+
+This guide explains how to configure agents to return validated, typed objects using Pydantic v2.
+
+## Overview
+
+- Leverages Pydantic v2 models for schema-first outputs
+- Central utility in `droidrun/agent/utils/structured_output.py`
+- Agent integration via `DroidAgent.set_output_schema()` and `DroidAgent.get_output_schema_instruction()`
+  (DroidAgent automatically injects the instruction and safely escapes braces when passing it to CodeAct)
+
+## Why
+
+- Strong typing and validation of agent results
+- Safer downstream usage by consumers (apps, tests, pipelines)
+- Clear prompt priming with schema hints
+
+## API
+
+- `coerce_to_model(schema, data)` → `BaseModel | None`
+- `model_json_schema(schema)` → dict JSON Schema (Pydantic v2)
+- `schema_instruction(schema)` → str prompt hint
+
+## Usage
+
+1) Define your model
+
+```python
+from pydantic import BaseModel
+
+class MyOutput(BaseModel):
+    success: bool
+    output: str
+    reason: str | None = None
+```
+
+2) Configure the agent
+
+```python
+agent.set_output_schema(MyOutput)
+```
+
+3) Use prompt hint (optional)
+
+```python
+instr = agent.get_output_schema_instruction()
+# Inject `instr` into your system prompt to nudge the LLM
+```
+
+Note: When you set a schema with `agent.set_output_schema(...)`, Droidrun will automatically inject a schema instruction into the CodeActAgent's system prompts during execution so the LLM is guided to produce outputs matching your schema. The instruction contains JSON-like braces; DroidAgent safely escapes these before passing them into any downstream templates that might use `str.format(...)`. You can still use `get_output_schema_instruction()` if you need to customize prompts.
+
+4) Tool-calling pattern inside the agent
+
+```python
+# IMPORTANT: Put machine-readable JSON in set_output(...), not in reason.
+set_output({
+    "success": True,
+    "output": "Search results for flights",
+    "reason": "Completed successfully"
+})
+complete(success=True, reason="Completed successfully")
+```
+
+Why: `reason` is human-readable. Schema validation only happens on the structured `output` dict captured via `set_output(...)`. Avoid placing JSON in `reason` to prevent parsing errors. Internally, CodeAct returns a result where `output` can be a dict; DroidAgent accepts that and validates at finalize time.
+
+5) Receive validated results
+
+At the end of the run, `DroidAgent.finalize()` attempts to coerce the raw result dict into your model. On success, `StopEvent` carries the `MyOutput` instance; otherwise a plain dict is returned.
+
+## Notes on Pydantic v2
+
+- Validation: `MyOutput.model_validate(data)`
+- JSON schema: `MyOutput.model_json_schema()`
+- Fields: `MyOutput.model_fields`
+
+---
+
+## End-to-End Example
+
+```python
+import asyncio
+from pydantic import BaseModel
+from llama_index.llms.openai_like import OpenAILike
+from droidrun import DroidAgent, AdbTools
+from droidrun.agent.context.personas import EXTRACTOR
+
+
+class MyOutput(BaseModel):
+    success: bool
+    output: str
+    reason: str | None = None
+
+
+async def main():
+    # 1) Set up Tools for your connected Android device
+    tools = AdbTools()
+
+    # 2) Configure an OpenAI-compatible LLM (see the OpenAI-like guide for details)
+    llm = GoogleGenAI(
+        api_key="YOUR_GEMINI_API_KEY",  # Replace with your Gemini API key
+        model="gemini-2.5-flash",  # or "gemini-2.5-pro" for enhanced reasoning
+    )
+
+    # 3) Create the agent with the Extractor persona for schema-focused tasks
+    agent = DroidAgent(
+        goal="Open app and search for flights",
+        llm=llm,
+        tools=tools,
+        personas=[EXTRACTOR],
+        reasoning=False,
+        reflection=False,
+        vision=False,
+    )
+
+    # 4) Set schema so the agent returns typed results at the end
+    agent.set_output_schema(MyOutput)
+
+    # 5) (Optional) Inspect the prompt instruction that will be auto-injected
+    print(agent.get_output_schema_instruction())
+
+    # 6) Run the agent
+    handler = agent.run()
+    result_event = await handler  # typically a StopEvent
+
+    # 7) Access the structured result
+    result = getattr(result_event, "result", result_event)  # MyOutput | dict
+    if isinstance(result, MyOutput):
+        print(result.output)
+    else:
+        # fallback dict if validation failed
+        print(result.get("output"))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+Notes:
+- The LLM prompt includes a schema hint automatically (see below).
+- At finalize, the raw result dict is validated with `MyOutput.model_validate(...)`.
+- On success, you get a `MyOutput` instance; otherwise, the original dict.
+
+## Prompt Injection Details
+
+- When you call `agent.set_output_schema(...)`, `DroidAgent` will pass a short schema instruction from `agent.get_output_schema_instruction()` into `CodeActAgent`.
+- `CodeActAgent` injects this instruction as an additional system message before chat history, nudging the LLM to emit JSON matching your model. DroidAgent escapes `{`/`}` in this text so downstream string templates using `.format(...)` do not break.
+- The instruction explicitly tells the model to call `set_output({...})` with a JSON object matching your schema, and then call `complete(success, reason)` with a short human-readable reason. Do not put JSON into `reason`.
+- You can still retrieve and customize the text returned by `get_output_schema_instruction()` if you want to augment your own system prompts.
+
+### Reasoning Mode Behavior
+
+In reasoning mode, intermediate steps may return a string `output` while also calling `set_output({...})` earlier in the loop. DroidAgent persists the last structured payload seen during CodeAct execution and, at finalize time, will validate that persisted dict if the immediate `FinalizeEvent.output` is not a dict. This ensures structured output works reliably with reasoning enabled.
+
+## Error Handling & Logging
+
+- Validation uses Pydantic v2 `model_validate`. Failures are logged via the `"droidrun"` logger with context (schema name, keys). The internal CodeAct result can carry `output` as a dict; this is supported.
+- Utility functions in `droidrun/agent/utils/structured_output.py` are the single place for schema ops:
+  - `coerce_to_model(schema, data)`
+    - Returns `BaseModel` instance on success.
+    - Returns `None` on validation failure and logs an error with context.
+  - `model_json_schema(schema)`
+    - Returns JSON schema for the model.
+    - Logs and re-raises on invalid input.
+  - `schema_instruction(schema)`
+    - Returns a concise prompt hint string derived from fields.
+    - Logs and re-raises on invalid input.
+
+
+## Troubleshooting
+
+- LLM outputs not matching schema:
+  - Ensure `agent.set_output_schema(...)` was called before running.
+  - Ensure prompts instruct the model to `set_output({...})` and to avoid placing JSON in `reason`.
+  - Inspect `agent.get_output_schema_instruction()` and consider adding your own clarifying constraints to the system prompt (DroidAgent ensures brace-safe injection).
+  
+### Result unwrapping in handlers
+
+Depending on the workflow stack, awaiting a handler may yield a `StopEvent` or a raw value. Prefer unwrapping defensively:
+
+```python
+handler = agent.run()
+ev = await handler
+result = getattr(ev, "result", ev)
+```
+
+`result` will be your Pydantic model instance when validation succeeds, or the original dict otherwise.
+  - If the model is complex, provide example JSON in your user/system prompts.
+
+- Validation fails with missing/incorrect fields:
+  - Check the logs under the `droidrun` logger for the exact field errors.
+  - Consider making some fields optional (`field: Type | None = None`) or adding validators if appropriate.
+  
+
+---
+
+If you need a working example tailored to your app flow or want to validate an end-to-end run, reach out by opening an issue or PR with your schema and intended output format.
