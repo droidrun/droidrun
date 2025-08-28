@@ -328,16 +328,18 @@ class CodeActAgent(Workflow):
         # Add final state observation to episodic memory
         await self._add_final_state_observation(ctx)
         
-        result = {}
-        result.update(
-            {
-                "success": ev.success,
-                "reason": ev.reason,
-                "output": ev.reason,
-                "codeact_steps": self.steps_counter,
-                "code_executions": self.code_exec_counter,
-            }
-        )
+        # Prefer structured payload captured via tools.set_output()
+        output_payload = getattr(self.tools, "final_output", None)
+        if output_payload is None:
+            output_payload = ev.reason
+
+        result = {
+            "success": ev.success,
+            "reason": ev.reason,
+            "output": output_payload,
+            "codeact_steps": self.steps_counter,
+            "code_executions": self.code_exec_counter,
+        }
 
         ctx.write_event_to_stream(
             EpisodicMemoryEvent(episodic_memory=self.episodic_memory)

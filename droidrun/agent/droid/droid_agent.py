@@ -161,6 +161,8 @@ class DroidAgent(Workflow):
         self.total_tokens = self.token_tracker.usage.total_tokens  # 0 initially
 
         self._output_schema: Optional[Type[BaseModel]] = None
+        # Persist last structured payload observed from CodeAct to support reasoning mode
+        self._last_structured_output: Optional[dict] = None
 
         logger.info("🤖 Initializing DroidAgent...")
         logger.info(f"💾 Trajectory saving level: {self.save_trajectories}")
@@ -279,6 +281,11 @@ class DroidAgent(Workflow):
         logger.info(f"🔧 Executing task: {task.description}")
 
         try:
+            # Build safe instruction string: if downstream uses str.format(), raw braces cause errors.
+            instr = self.get_output_schema_instruction()
+            if isinstance(instr, str):
+                instr = instr.replace("{", "{{").replace("}", "}}")
+
             codeact_agent = CodeActAgent(
                 llm=self.llm,
                 persona=persona,
@@ -288,7 +295,7 @@ class DroidAgent(Workflow):
                 tools_instance=self.tools_instance,
                 debug=self.debug,
                 timeout=self.timeout,
-                output_schema_instruction=self.get_output_schema_instruction(),
+                output_schema_instruction=instr,
             )
 
             handler = codeact_agent.run(
@@ -306,15 +313,17 @@ class DroidAgent(Workflow):
                 return CodeActResultEvent(
                     success=True,
                     reason=result["reason"],
+                    output=result.get("output"),
                     task=task,
-                    steps=result["codeact_steps"],
+                    steps=len(result.get("codeact_steps", [])),
                 )
             else:
                 return CodeActResultEvent(
                     success=False,
                     reason=result["reason"],
+                    output=result.get("output"),
                     task=task,
-                    steps=result["codeact_steps"],
+                    steps=len(result.get("codeact_steps", [])),
                 )
 
         except Exception as e:
@@ -323,9 +332,8 @@ class DroidAgent(Workflow):
                 import traceback
 
                 logger.error(traceback.format_exc())
-            return CodeActResultEvent(
-                success=False, reason=f"Error: {str(e)}", task=task, steps=[]
-            )
+            err = f"Error: {str(e)}"
+            return CodeActResultEvent(success=False, reason=err, output=err, task=task, steps=0)
 
     @step
     async def handle_codeact_execute(self, ctx: Context, ev: CodeActResultEvent) -> FinalizeEvent | ReflectionEvent | ReasoningLogicEvent:
@@ -334,8 +342,11 @@ class DroidAgent(Workflow):
     ) -> FinalizeEvent | ReflectionEvent:
         try:
             task = ev.task
+            # Persist structured payload if present to survive reasoning loops
+            if isinstance(ev.output, dict):
+                self._last_structured_output = ev.output
             if not self.reasoning:
-                return FinalizeEvent(success=ev.success, reason=ev.reason, output=ev.reason, task=[task], tasks=[task], steps=ev.steps)
+                return FinalizeEvent(success=ev.success, reason=ev.reason, output=ev.output if ev.output is not None else ev.reason, task=[task], tasks=[task], steps=ev.steps)
             
             if self.reflection and ev.success:
                 return FinalizeEvent(
@@ -543,7 +554,13 @@ class DroidAgent(Workflow):
             self.trajectory.save_trajectory()
 
         # Return structured output if schema is configured and validation succeeds
-        structured = self._build_structured_output(result)
+        structured = None
+        candidate_output = ev.output
+        # If ev.output is not a dict (common in reasoning mode), try last structured payload
+        if not isinstance(candidate_output, dict) and isinstance(self._last_structured_output, dict):
+            candidate_output = self._last_structured_output
+        if isinstance(candidate_output, dict):
+            structured = self._build_structured_output(candidate_output)
         if structured is not None:
             return StopEvent(structured)
         return StopEvent(result)

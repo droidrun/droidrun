@@ -16,6 +16,7 @@ DEFAULT = AgentPersona(
         Tools.start_app.__name__,
         Tools.list_packages.__name__,
         Tools.remember.__name__,
+        Tools.set_output.__name__,
         Tools.complete.__name__
     ],
     required_context=[
@@ -38,6 +39,10 @@ DEFAULT = AgentPersona(
     - If a goal's precondition is unmet, fail the task by calling `complete(success=False, reason='...')` with an explanation.
     - If you task is complete, you should use the complete(success:bool, reason:str) function within a code block to mark it as finished. The success parameter should be True if the task was completed successfully, and False otherwise. The reason parameter should be a string explaining the reason for failure if failed.
 
+
+    ## Structured Output Guidance
+    - If a structured output schema is configured, first call `set_output({...})` with a JSON object matching the schema, then call `complete(success, reason)` with a short human-readable reason.
+    - Do NOT place JSON in the `reason` string. `reason` is for human-readable summaries only.
 
     ## Context:
     The following context is given to you for analysis:

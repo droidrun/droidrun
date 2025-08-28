@@ -1,6 +1,6 @@
 from llama_index.core.workflow import Event
 from droidrun.agent.context import Reflection, Task
-from typing import List, Optional
+from typing import List, Optional, Any
 
 class CodeActExecuteEvent(Event):
     task: Task
@@ -9,6 +9,7 @@ class CodeActExecuteEvent(Event):
 class CodeActResultEvent(Event):
     success: bool
     reason: str
+    output: Any
     steps: int
 
 class ReasoningLogicEvent(Event):
@@ -19,7 +20,7 @@ class FinalizeEvent(Event):
     success: bool
     # deprecated. use output instead.
     reason: str
-    output: str
+    output: Any
     # deprecated. use tasks instead.
     task: List[Task]
     tasks: List[Task]

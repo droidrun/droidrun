@@ -60,7 +60,17 @@ class ContextInjectionManager:
             AgentPersona instance or None if not found
         """
         
-        return self.personas.get(agent_type)
+        persona = self.personas.get(agent_type)
+        if persona:
+            return persona
+        # Fallbacks: if explicit agent_type persona isn't found,
+        # 1) use a 'Default' persona if available, else
+        # 2) use the first provided persona (e.g., Extractor when user passes only that)
+        if "Default" in self.personas:
+            return self.personas["Default"]
+        if self.personas:
+            return next(iter(self.personas.values()))
+        return None
         
     def get_all_personas(self) -> List[str]:
         return self.personas

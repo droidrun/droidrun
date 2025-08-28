@@ -139,6 +139,17 @@ class Tools(ABC):
         """
         pass
 
+    # Structured output support: optional helper for agents to store
+    # machine-readable payloads separate from human-readable reasons.
+    def set_output(self, data: Dict[str, Any]) -> str:
+        """
+        Store a structured payload to be consumed by agents at finalize time.
+
+        This does not mark completion; callers should still invoke `complete(...)`.
+        """
+        setattr(self, "final_output", data)
+        return "stored"
+
 
 def describe_tools(tools: Tools, exclude_tools: Optional[List[str]] = None) -> Dict[str, Callable[..., Any]]:
     """
@@ -166,6 +177,8 @@ def describe_tools(tools: Tools, exclude_tools: Optional[List[str]] = None) -> D
         # state management
         "remember": tools.remember,
         "complete": tools.complete,
+        # structured output
+        "set_output": tools.set_output,
     }
 
     # Remove excluded tools

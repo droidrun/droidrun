@@ -15,10 +15,14 @@ def coerce_to_model(schema: Type[BaseModel], data: Dict[str, Any]) -> Optional[B
     try:
         return schema.model_validate(data)
     except Exception as e:
+        # Log keys if dict; otherwise log input type to avoid secondary errors
+        keys_or_type = (
+            sorted(list(data.keys())) if isinstance(data, dict) else f"type={type(data).__name__}"
+        )
         logger.exception(
             "coerce_to_model failed: schema=%s, keys=%s, error=%s",
             getattr(schema, "__name__", str(schema)),
-            sorted(list(data.keys())),
+            keys_or_type,
             e,
         )
         return None

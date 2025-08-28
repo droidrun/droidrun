@@ -31,7 +31,8 @@
                   "v3/guides/gemini",
                   "v3/guides/openailike",
                   "v3/guides/ollama",
-                  "v3/guides/telemetry"
+                  "v3/guides/telemetry",
+                  "v3/guides/structured-output"
                 ]
               },
               {
