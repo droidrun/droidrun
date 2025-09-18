@@ -22,6 +22,19 @@ posthog = Posthog(
     disable_geoip=False,
 )
 
+# Optional redactor that can be set by the CLI to remove secrets
+_redactor = None  # callable or None
+
+
+def set_redactor(redactor):
+    """Set a redactor callable applied to messages and properties.
+
+    The redactor is expected to accept either a string or a nested
+    Python structure and return the redacted version.
+    """
+    global _redactor
+    _redactor = redactor
+
 
 def is_telemetry_enabled():
     telemetry_enabled = os.environ.get("DROIDRUN_TELEMETRY_ENABLED", "true")
@@ -32,10 +45,16 @@ def is_telemetry_enabled():
 
 def print_telemetry_message():
     if is_telemetry_enabled():
-        droidrun_logger.info(TELEMETRY_ENABLED_MESSAGE)
+        msg = TELEMETRY_ENABLED_MESSAGE
+        if _redactor:
+            msg = _redactor(msg)
+        droidrun_logger.info(msg)
 
     else:
-        droidrun_logger.info(TELEMETRY_DISABLED_MESSAGE)
+        msg = TELEMETRY_DISABLED_MESSAGE
+        if _redactor:
+            msg = _redactor(msg)
+        droidrun_logger.info(msg)
 
 
 # Print telemetry message on import
@@ -48,8 +67,12 @@ def get_user_id() -> str:
             USER_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
             USER_ID_PATH.touch()
             USER_ID_PATH.write_text(str(uuid4()))
-        logger.debug(f"User ID: {USER_ID_PATH.read_text()}")
-        return USER_ID_PATH.read_text()
+        uid = USER_ID_PATH.read_text()
+        dbg = f"User ID: {uid}"
+        if _redactor:
+            dbg = _redactor(dbg)
+        logger.debug(dbg)
+        return uid
     except Exception as e:
         logger.error(f"Error getting user ID: {e}")
         return "unknown"
@@ -67,8 +90,15 @@ def capture(event: TelemetryEvent, user_id: str | None = None):
             **event_data,
         }
 
+        # Redact properties
+        if _redactor:
+            properties = _redactor(properties)
+
         posthog.capture(event_name, distinct_id=user_id or get_user_id(), properties=properties)
-        logger.debug(f"Captured event: {event_name} with properties: {event}")
+        dbg = f"Captured event: {event_name} with properties: {event}"
+        if _redactor:
+            dbg = _redactor(dbg)
+        logger.debug(dbg)
     except Exception as e:
         logger.error(f"Error capturing event: {e}")
 

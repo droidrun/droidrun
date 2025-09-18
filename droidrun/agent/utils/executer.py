@@ -145,4 +145,11 @@ class SimpleCodeExecutor:
             'screenshots': self.globals['step_screenshots'],
             'ui_states': self.globals['step_ui_states'],
         }
+        # Redact output if a credential manager is attached to the tools instance
+        try:
+            cm = getattr(self.tools_instance, "credential_manager", None)
+            if cm is not None:
+                result['output'] = cm.redact(result['output'])
+        except Exception:
+            logger.exception("Error while redacting output.")
         return result
