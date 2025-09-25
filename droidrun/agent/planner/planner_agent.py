@@ -18,7 +18,8 @@ from droidrun.agent.utils.executer import SimpleCodeExecutor
 from droidrun.agent.utils import chat_utils
 from droidrun.agent.context.task_manager import TaskManager
 from droidrun.tools import Tools
-from droidrun.agent.common.events import ScreenshotEvent, RecordUIStateEvent
+from droidrun.agent.common.constants import LLM_HISTORY_LIMIT
+from droidrun.agent.common.events import RecordUIStateEvent, ScreenshotEvent
 from droidrun.agent.planner.events import (
     PlanInputEvent,
     PlanCreatedEvent,
@@ -286,7 +287,8 @@ wrap your code inside this:
             chat_history = await chat_utils.add_phone_state_block(await ctx.get("phone_state"), chat_history)
             chat_history = await chat_utils.add_ui_text_block(await ctx.get("ui_state"), chat_history)
 
-            messages_to_send = [self.system_message] + chat_history
+            limited_history = self._limit_history(chat_history)
+            messages_to_send = [self.system_message] + limited_history
             messages_to_send = [
                 chat_utils.message_copy(msg) for msg in messages_to_send
             ]
@@ -302,3 +304,23 @@ wrap your code inside this:
         except Exception as e:
             logger.error(f"Could not get an answer from LLM: {repr(e)}")
             raise e
+
+    def _limit_history(
+        self, chat_history: List[ChatMessage]
+    ) -> List[ChatMessage]:
+        if LLM_HISTORY_LIMIT <= 0:
+            return chat_history
+
+        max_messages = LLM_HISTORY_LIMIT * 2
+        if len(chat_history) <= max_messages:
+            return chat_history
+
+        preserved_head: List[ChatMessage] = []
+        if chat_history and chat_history[0].role == "user":
+            preserved_head = [chat_history[0]]
+
+        tail = chat_history[-max_messages:]
+        if preserved_head and preserved_head[0] in tail:
+            preserved_head = []
+
+        return preserved_head + tail
