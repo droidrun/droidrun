@@ -18,7 +18,8 @@ from droidrun.agent.codeact.events import (
     TaskThinkingEvent,
     EpisodicMemoryEvent,
 )
-from droidrun.agent.common.events import ScreenshotEvent, RecordUIStateEvent
+from droidrun.agent.common.constants import LLM_HISTORY_LIMIT
+from droidrun.agent.common.events import RecordUIStateEvent, ScreenshotEvent
 from droidrun.agent.usage import get_usage_from_response
 from droidrun.agent.utils import chat_utils
 from droidrun.agent.utils.executer import SimpleCodeExecutor
@@ -347,14 +348,15 @@ class CodeActAgent(Workflow):
         self, ctx: Context, chat_history: List[ChatMessage]
     ) -> ChatResponse | None:
         logger.debug("🔍 Getting LLM response...")
-        messages_to_send = [self.system_prompt] + chat_history
+        limited_history = self._limit_history(chat_history)
+        messages_to_send = [self.system_prompt] + limited_history
         messages_to_send = [chat_utils.message_copy(msg) for msg in messages_to_send]
         try:
             response = await self.llm.achat(messages=messages_to_send)
             logger.debug("🔍 Received LLM response.")
 
             filtered_chat_history = []
-            for msg in chat_history:
+            for msg in limited_history:
                 filtered_msg = chat_utils.message_copy(msg)
                 if hasattr(filtered_msg, "blocks") and filtered_msg.blocks:
                     filtered_msg.blocks = [
@@ -422,6 +424,26 @@ class CodeActAgent(Workflow):
                 raise e
         logger.debug("  - Received response from LLM.")
         return response
+
+    def _limit_history(
+        self, chat_history: List[ChatMessage]
+    ) -> List[ChatMessage]:
+        if LLM_HISTORY_LIMIT <= 0:
+            return chat_history
+
+        max_messages = LLM_HISTORY_LIMIT * 2
+        if len(chat_history) <= max_messages:
+            return chat_history
+
+        preserved_head: List[ChatMessage] = []
+        if chat_history and chat_history[0].role == "user":
+            preserved_head = [chat_history[0]]
+
+        tail = chat_history[-max_messages:]
+        if preserved_head and preserved_head[0] in tail:
+            preserved_head = []
+
+        return preserved_head + tail
 
     async def _add_final_state_observation(self, ctx: Context) -> None:
         """Add the current UI state and screenshot as the final observation step."""
