@@ -4,7 +4,7 @@ to achieve a user's goal on an Android device.
 """
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import step, StartEvent, StopEvent, Workflow, Context
@@ -15,6 +15,11 @@ from droidrun.agent.codeact.events import EpisodicMemoryEvent
 from droidrun.agent.planner import PlannerAgent
 from droidrun.agent.context.task_manager import TaskManager
 from droidrun.agent.utils.trajectory import Trajectory
+from droidrun.agent.memory import (
+    TrajectoryMemory,
+    create_memory_client,
+    parse_trajectory_for_manual,
+)
 from droidrun.tools import Tools, describe_tools
 from droidrun.agent.common.events import ScreenshotEvent, MacroEvent, RecordUIStateEvent
 from droidrun.agent.common.default import MockWorkflow
@@ -152,6 +157,17 @@ class DroidAgent(Workflow):
         self.tools_instance = tools
 
         self.tools_instance.save_trajectories = self.save_trajectories
+
+        self.memory_client: TrajectoryMemory = create_memory_client()
+        if (
+            self.reasoning
+            and self.memory_client.enabled
+            and not self.reference_trajectory_manual
+        ):
+            manual = self.memory_client.fetch_reference_manual(goal)
+            if manual:
+                logger.info("📖 Loaded reference trajectory from memory service.")
+                self.reference_trajectory_manual = manual
 
         if self.reasoning:
             logger.info("📝 Initializing Planner Agent...")
@@ -466,6 +482,24 @@ class DroidAgent(Workflow):
             "output": ev.output,
             "steps": ev.steps,
         }
+
+        if self.memory_client.enabled:
+            try:
+                manual = parse_trajectory_for_manual(self.trajectory)
+                manual["status"] = (
+                    manual.get("status")
+                    if manual.get("status") not in {None, "unknown"}
+                    else ("success" if ev.success else "failure")
+                )
+                if manual.get("execution_steps"):
+                    uploaded = self.memory_client.add_trajectory(manual)
+                    if uploaded:
+                        logger.debug(
+                            "Trajectory uploaded to memory service with status '%s'.",
+                            manual.get("status"),
+                        )
+            except Exception as exc:
+                logger.debug("Skipping trajectory memory upload: %s", exc)
 
         if self.trajectory and self.save_trajectories != "none":
             self.trajectory.save_trajectory()

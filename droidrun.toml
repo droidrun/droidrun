@@ -1,0 +1,16 @@
+# Default configuration for Droidrun trajectory memory
+[memory]
+provider = "local_http"
+
+[memory.local_http]
+base_url = "http://localhost:8000"
+enabled = true
+similarity_threshold = 0.5
+timeout = 5
+
+# Adjust/uncomment the section below to use a remote memory backend
+#[memory.remote_http]
+#base_url = "https://your-backend.example.com"
+#auth_token = "YOUR_TOKEN"
+#similarity_threshold = 0.6
+#timeout = 10

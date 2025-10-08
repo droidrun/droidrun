@@ -17,6 +17,7 @@ from droidrun.agent.context.personas import DEFAULT, BIG_AGENT
 from functools import wraps
 from droidrun.cli.logs import LogHandler
 from droidrun.telemetry import print_telemetry_message
+from droidrun.agent.memory import create_memory_client
 from droidrun.portal import (
     download_portal_apk,
     enable_portal_accessibility,
@@ -58,14 +59,12 @@ def configure_logging(goal: str, debug: bool):
 
     return handler
 
-
 def coro(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
         return asyncio.run(f(*args, **kwargs))
 
     return wrapper
-
 
 @coro
 async def run_command(
@@ -130,7 +129,6 @@ async def run_command(
             # Select personas based on --drag flag
             personas = [BIG_AGENT] if allow_drag else [DEFAULT]
 
-            # LLM setup
             log_handler.update_step("Initializing LLM...")
             llm = load_llm(
                 provider_name=provider,
@@ -141,7 +139,6 @@ async def run_command(
             )
             logger.info(f"🧠 LLM ready: {provider}/{model}")
 
-            # Agent setup
             log_handler.update_step("Initializing DroidAgent...")
 
             mode = "planning with reasoning" if reasoning else "direct execution"
@@ -149,6 +146,19 @@ async def run_command(
 
             if tracing:
                 logger.info("🔍 Tracing enabled")
+
+            memory_client = create_memory_client()
+            reference_manual_str = None
+            if reasoning and memory_client.enabled:
+                print("Checking long-term memory for similar tasks...")
+                manual_str = memory_client.fetch_reference_manual(command)
+                if manual_str:
+                    reference_manual_str = manual_str
+                    print("Found a relevant trajectory. Providing it to the agent as a reference.")
+                else:
+                    print("No highly similar trajectories found. Proceeding with standard planning.")
+            elif reasoning:
+                logger.debug("Memory service disabled; proceeding without reference trajectory.")
 
             droid_agent = DroidAgent(
                 goal=command,
@@ -164,6 +174,7 @@ async def run_command(
                 enable_tracing=tracing,
                 debug=debug,
                 save_trajectories=save_trajectory,
+                reference_trajectory_manual=reference_manual_str,
             )
 
             logger.info("▶️  Starting agent execution...")

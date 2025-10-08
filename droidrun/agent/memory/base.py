@@ -1,0 +1,58 @@
+"""Protocol definitions for trajectory memory clients"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional, Protocol, TypedDict, runtime_checkable
+
+
+class TrajectoryExecutionStep(TypedDict, total=False):
+    step_index: int
+    reasoning: str
+    action_code: str
+
+
+class TrajectoryManual(TypedDict, total=False):
+    goal: str
+    initial_plan: Dict[str, Any]
+    execution_steps: List[TrajectoryExecutionStep]
+    status: str
+
+
+@runtime_checkable
+class TrajectoryMemory(Protocol):
+    """Contract for trajectory memory providers"""
+
+    enabled: bool
+
+    def fetch_reference_manual(self, goal: str) -> Optional[str]:
+        """Return a formatted manual for the closest stored trajectory"""
+
+    def find_trajectory(self, goal: str) -> Optional[TrajectoryManual]:
+        """Return structured data for the closest stored trajectory"""
+
+    def add_trajectory(self, manual: TrajectoryManual) -> bool:
+        """Save the trajectory manual and return success"""
+
+
+class DisabledTrajectoryMemoryClient(TrajectoryMemory):
+    """No op fallback used when memory is disabled"""
+
+    def __init__(self) -> None:
+        self.enabled = False
+
+    def fetch_reference_manual(self, goal: str) -> Optional[str]:
+        return None
+
+    def find_trajectory(self, goal: str) -> Optional[TrajectoryManual]:
+        return None
+
+    def add_trajectory(self, manual: TrajectoryManual) -> bool:
+        return False
+
+
+__all__ = [
+    "TrajectoryManual",
+    "TrajectoryExecutionStep",
+    "TrajectoryMemory",
+    "DisabledTrajectoryMemoryClient",
+]

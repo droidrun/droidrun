@@ -68,6 +68,37 @@ Read on how to get droidrun up and running within seconds in [our docs](https://
 - Remote assistance for less technical users
 - Exploring mobile UI with natural language commands
 
+## ⚙️ Trajectory Memory Configuration
+
+Configure how Droidrun stores and retrieves past trajectories with a TOML file. The CLI looks for:
+
+1. `droidrun.toml` or `droidrun_config.toml` in the current working directory, then
+2. `~/.droidrun/config.toml`, then
+3. `~/.droidrun.toml`
+
+Create one of these files and add a `memory` section:
+
+```toml
+[memory]
+provider = "local_http"  # other options: "remote_http" or "disabled"
+
+[memory.local_http]
+base_url = "http://localhost:8000"
+enabled = true
+similarity_threshold = 0.5
+timeout = 5
+
+[memory.remote_http]
+base_url = "https://yourbackend.com"
+auth_token = "<optional bearer token>"
+similarity_threshold = 0.6
+timeout = 10
+```
+
+- Omit `memory.remote_http` if you only run the local RAG server.
+- Set `provider = "remote_http"` to delegate lookups to your backend, provide `base_url` and `auth_token` if needed.
+- Use `provider = "disabled"` to turn the feature off.
+
 ## 👥 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
