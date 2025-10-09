@@ -80,6 +80,7 @@ class DroidAgent(Workflow):
         debug: bool = False,
         save_trajectories: str = "none",
         excluded_tools: List[str] = None,
+        reference_trajectory_manual: Optional[str] = None,
         *args,
         **kwargs,
     ):
@@ -103,6 +104,7 @@ class DroidAgent(Workflow):
             **kwargs: Additional keyword arguments to pass to the agents
         """
         self.user_id = kwargs.pop("user_id", None)
+        self.reference_trajectory_manual = reference_trajectory_manual
         super().__init__(timeout=timeout, *args, **kwargs)
         # Configure default logging if not already configured
         self._configure_default_logging(debug=debug)
