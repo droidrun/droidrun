@@ -5,9 +5,9 @@ from droidrun.agent.planner.prompts import (
 )
 import logging
 import asyncio
-from typing import List, TYPE_CHECKING, Union
+from typing import List, TYPE_CHECKING, Union, Optional
 import inspect
-from llama_index.core.base.llms.types import ChatMessage, ChatResponse
+from llama_index.core.base.llms.types import ChatMessage, ChatResponse, TextBlock
 from llama_index.core.prompts import PromptTemplate
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import Workflow, StartEvent, StopEvent, Context, step
@@ -286,6 +286,12 @@ wrap your code inside this:
 
             chat_history = await chat_utils.add_phone_state_block(await ctx.store.get("phone_state"), chat_history)
             chat_history = await chat_utils.add_ui_text_block(await ctx.store.get("ui_state"), chat_history)
+
+            if self.reference_trajectory_manual:
+                chat_history = chat_history.copy()
+                chat_history[-1] = chat_utils.message_copy(chat_history[-1])
+                reference_block = TextBlock(text=f"\n{self.reference_trajectory_manual}\n")
+                chat_history[-1].blocks.insert(0, reference_block)
 
             limited_history = self._limit_history(chat_history)
             messages_to_send = [self.system_message] + limited_history
