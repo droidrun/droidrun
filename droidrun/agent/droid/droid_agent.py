@@ -258,19 +258,21 @@ class DroidAgent(Workflow):
 
             result = await handler
 
+            steps_taken = int(result.get("codeact_steps", 0) or 0)
+
             if "success" in result and result["success"]:
                 return CodeActResultEvent(
                     success=True,
                     reason=result["reason"],
                     task=task,
-                    steps=result["codeact_steps"],
+                    steps=steps_taken,
                 )
             else:
                 return CodeActResultEvent(
                     success=False,
                     reason=result["reason"],
                     task=task,
-                    steps=result["codeact_steps"],
+                    steps=steps_taken,
                 )
 
         except Exception as e:
@@ -279,7 +281,12 @@ class DroidAgent(Workflow):
                 import traceback
 
                 logger.error(traceback.format_exc())
-            return CodeActResultEvent(success=False, reason=f"Error: {str(e)}", task=task, steps=[])
+            return CodeActResultEvent(
+                success=False,
+                reason=f"Error: {str(e)}",
+                task=task,
+                steps=0,
+            )
 
     @step
     async def handle_codeact_execute(
@@ -494,12 +501,35 @@ class DroidAgent(Workflow):
                     else ("success" if ev.success else "failure")
                 )
                 if manual.get("execution_steps"):
-                    uploaded = self.memory_client.add_trajectory(manual)
-                    if uploaded:
+                    existing_manual = self.memory_client.find_trajectory(self.goal)
+                    existing_status = (
+                        (existing_manual.get("status") or "").lower()
+                        if existing_manual
+                        else ""
+                    )
+                    existing_id = (
+                        existing_manual.get("trajectory_id")
+                        if existing_manual
+                        else None
+                    )
+
+                    current_status = (manual.get("status") or "").lower()
+
+                    if existing_status == "success" and current_status == "success":
                         logger.debug(
-                            "Trajectory uploaded to memory service with status '%s'.",
-                            manual.get("status"),
+                            "Skipping trajectory upload: existing successful manual already covers goal '%s'.",
+                            self.goal,
                         )
+                    else:
+                        if existing_id:
+                            manual["trajectory_id"] = existing_id
+                        uploaded = self.memory_client.add_trajectory(manual)
+                        if uploaded:
+                            logger.debug(
+                                "Trajectory %s to memory service with status '%s'.",
+                                "updated" if existing_id else "uploaded",
+                                manual.get("status"),
+                            )
             except Exception as exc:
                 logger.debug("Skipping trajectory memory upload: %s", exc)
 

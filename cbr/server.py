@@ -17,6 +17,7 @@ class TrajectoryData(BaseModel):
     initial_plan: dict
     execution_steps: list
     status: str
+    trajectory_id: Optional[str] = None
 
 class Query(BaseModel):
     goal: str
@@ -37,7 +38,19 @@ print("ChromaDB collection loaded/created.")
 def add_trajectory(data: TrajectoryData):
     """Saves a new successful trajectory."""
     try:
-        trajectory_id = str(uuid.uuid4())
+        trajectory_id = data.trajectory_id or str(uuid.uuid4())
+
+        if data.trajectory_id:
+            try:
+                collection.delete(ids=[trajectory_id])
+            except Exception as e:
+                print(f"Warning: failed to delete existing trajectory {trajectory_id} from vector store: {e}")
+            existing_path = os.path.join(DATA_DIR, f"{trajectory_id}.json")
+            if os.path.exists(existing_path):
+                try:
+                    os.remove(existing_path)
+                except OSError as e:
+                    print(f"Warning: failed to delete existing trajectory file {existing_path}: {e}")
 
         embedding_text = f"Goal: {data.goal}. Plan: {data.initial_plan.get('reasoning', '')}"
 
@@ -52,8 +65,10 @@ def add_trajectory(data: TrajectoryData):
         )
 
         file_path = os.path.join(DATA_DIR, f"{trajectory_id}.json")
+        payload = data.model_dump()
+        payload["trajectory_id"] = trajectory_id
         with open(file_path, 'w') as f:
-            json.dump(data.model_dump(), f, indent=2)
+            json.dump(payload, f, indent=2)
 
         print(f"Successfully added '{status}' trajectory {trajectory_id}")
         return {"message": "Trajectory added successfully", "trajectory_id": trajectory_id}
@@ -101,7 +116,10 @@ def find_trajectory(query: Query):
                 )
                 return None
             print(f"Match accepted: Score above threshold.")
-            return _load_trajectory(match_id)
+            manual = _load_trajectory(match_id)
+            if manual is not None:
+                manual["trajectory_id"] = match_id
+            return manual
 
         print("Stage 1: Searching for a successful trajectory...")
         success_results = _query_by_status("success")
@@ -127,4 +145,3 @@ def health_check():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

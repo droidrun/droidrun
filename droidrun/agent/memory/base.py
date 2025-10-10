@@ -16,6 +16,7 @@ class TrajectoryManual(TypedDict, total=False):
     initial_plan: Dict[str, Any]
     execution_steps: List[TrajectoryExecutionStep]
     status: str
+    trajectory_id: str
 
 
 @runtime_checkable
