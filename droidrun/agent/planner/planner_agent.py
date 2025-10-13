@@ -7,6 +7,9 @@ import logging
 import asyncio
 from typing import List, TYPE_CHECKING, Union, Optional
 import inspect
+import json
+from pathlib import Path
+from datetime import datetime
 from llama_index.core.base.llms.types import ChatMessage, ChatResponse, TextBlock
 from llama_index.core.prompts import PromptTemplate
 from llama_index.core.llms.llm import LLM
@@ -40,6 +43,7 @@ if TYPE_CHECKING:
 
 
 class PlannerAgent(Workflow):
+    reference_trajectory_manual: Optional[str] = None
     def __init__(
         self,
         goal: str,
@@ -298,6 +302,40 @@ wrap your code inside this:
             messages_to_send = [
                 chat_utils.message_copy(msg) for msg in messages_to_send
             ]
+
+            if logger.isEnabledFor(logging.DEBUG) and self.reference_trajectory_manual:
+                debug_dir = Path.cwd() / "logs"
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+                log_path = debug_dir / f"planner_messages_{ts}.json"
+                try:
+                    with log_path.open("w", encoding="utf-8") as fh:
+                        json.dump(
+                            {
+                                "reference_injected": True,
+                                "messages": [
+                                    {
+                                        "role": msg.role,
+                                        "content": [
+                                            block.model_dump()
+                                            for block in getattr(msg, "blocks", [])
+                                        ],
+                                    }
+                                    for msg in messages_to_send
+                                ],
+                            },
+                            fh,
+                            indent=2,
+                        )
+                    logger.debug(
+                        "Saved planner message snapshot with reference trajectory to %s",
+                        log_path,
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "Failed to write planner message snapshot: %s",
+                        exc,
+                    )
 
             logger.debug(f"  - Final message count: {len(messages_to_send)}")
 

@@ -183,6 +183,7 @@ class DroidAgent(Workflow):
                 timeout=timeout,
                 debug=debug,
             )
+            self.planner_agent.reference_trajectory_manual = self.reference_trajectory_manual
             self.max_codeact_steps = 5
 
             if self.reflection:
