@@ -9,7 +9,7 @@ Architecture:
 
 import asyncio
 import logging
-from typing import List
+from typing import List, Optional
 from droidrun.agent.utils.tools import create_tools_from_config
 import llama_index.core
 from llama_index.core.llms.llm import LLM
@@ -39,6 +39,11 @@ from droidrun.agent.scripter import ScripterAgent
 from droidrun.agent.utils.async_utils import wrap_async_tools
 from droidrun.agent.utils.tools import ATOMIC_ACTION_SIGNATURES, open_app
 from droidrun.agent.utils.trajectory import Trajectory
+from droidrun.agent.memory import (
+    TrajectoryMemory,
+    create_memory_client,
+    parse_trajectory_for_manual,
+)
 from droidrun.config_manager.config_manager import (
     AgentConfig,
     DeviceConfig,
@@ -107,6 +112,8 @@ class DroidAgent(Workflow):
         telemetry_config: TelemetryConfig | None = None,
         excluded_tools: List[str] = None,
         custom_tools: dict = None,
+        memory_client: Optional[TrajectoryMemory] = None,
+        reference_trajectory_manual: Optional[str] = None,
         timeout: int = 1000,
         *args,
         **kwargs,
@@ -132,6 +139,8 @@ class DroidAgent(Workflow):
 
         self.user_id = kwargs.pop("user_id", None)
         self.runtype = kwargs.pop("runtype", "developer")
+        self.goal = goal
+        self.reference_trajectory_manual = reference_trajectory_manual
         self.shared_state = DroidAgentState(instruction=goal, err_to_manager_thresh=2)
         base_config = config
 
@@ -192,6 +201,9 @@ class DroidAgent(Workflow):
 
         self.timeout = timeout
         self.custom_tools = custom_tools or {}
+        self.memory_client: TrajectoryMemory = memory_client or create_memory_client(
+            config=self.config
+        )
 
         if isinstance(llms, dict):
             self.manager_llm = llms.get("manager")
@@ -234,6 +246,16 @@ class DroidAgent(Workflow):
         self.tools_instance.app_opener_llm = self.app_opener_llm
         self.tools_instance.text_manipulator_llm = self.text_manipulator_llm
 
+        if (
+            self.config.agent.reasoning
+            and self.memory_client.enabled
+            and not self.reference_trajectory_manual
+        ):
+            manual = self.memory_client.fetch_reference_manual(goal)
+            if manual:
+                logger.info("📖 Loaded reference trajectory from memory service.")
+                self.reference_trajectory_manual = manual
+
         if self.config.agent.reasoning:
             logger.info("📝 Initializing Manager and Executor Agents...")
             self.manager_agent = ManagerAgent(
@@ -243,6 +265,7 @@ class DroidAgent(Workflow):
                 agent_config=self.config.agent,
                 custom_tools=self.custom_tools,
                 timeout=timeout,
+                reference_trajectory_manual=self.reference_trajectory_manual,
             )
             self.executor_agent = ExecutorAgent(
                 llm=self.executor_llm,
@@ -675,6 +698,55 @@ class DroidAgent(Workflow):
             "reason": ev.reason,
             "steps": self.shared_state.step_number,
         }
+
+        if self.memory_client.enabled and self.trajectory:
+            try:
+                manual = parse_trajectory_for_manual(self.trajectory)
+                current_status = manual.get("status") or None
+                if current_status in {None, "unknown"}:
+                    manual["status"] = "success" if ev.success else "failure"
+
+                should_upload = bool(manual.get("execution_steps")) or bool(
+                    manual.get("initial_plan")
+                )
+
+                if should_upload:
+                    existing_manual = self.memory_client.find_trajectory(self.goal)
+                    existing_status = (
+                        (existing_manual.get("status") or "").lower()
+                        if existing_manual
+                        else ""
+                    )
+                    existing_id = (
+                        existing_manual.get("trajectory_id")
+                        if existing_manual
+                        else None
+                    )
+
+                    new_status = (manual.get("status") or "").lower()
+
+                    if existing_status == "success" and new_status == "success":
+                        logger.debug(
+                            "Skipping trajectory upload: existing successful manual already covers goal '%s'.",
+                            self.goal,
+                        )
+                    else:
+                        if existing_id:
+                            manual["trajectory_id"] = existing_id
+                        uploaded = self.memory_client.add_trajectory(manual)
+                        if uploaded:
+                            logger.debug(
+                                "Trajectory %s to memory service with status '%s'.",
+                                "updated" if existing_id else "uploaded",
+                                manual.get("status"),
+                            )
+                else:
+                    logger.debug(
+                        "Skipping trajectory upload: no execution steps or plan captured for goal '%s'.",
+                        self.goal,
+                    )
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.debug("Skipping trajectory memory upload: %s", exc)
 
         if self.trajectory and self.config.logging.save_trajectory != "none":
             self.trajectory.save_trajectory()

@@ -164,6 +164,22 @@ logging:
   save_trajectory: none
   rich_text: false
 
+# === Memory Settings ===
+memory:
+  # Provider: disabled, local_http, remote_http
+  provider: disabled
+  local_http:
+    enabled: false
+    base_url: http://localhost:8000
+    similarity_threshold: 0.5
+    timeout: 5
+  remote_http:
+    enabled: false
+    base_url: null
+    auth_token: null
+    similarity_threshold: 0.6
+    timeout: 10
+
 # === Safe Execution Settings ===
 # Applied when agent.codeact.safe_execution or agent.scripter.safe_execution is true
 safe_execution:
@@ -380,6 +396,36 @@ class LoggingConfig:
 
 
 @dataclass
+class LocalMemoryConfig:
+    """Configuration for the local HTTP trajectory memory service."""
+
+    enabled: bool = False
+    base_url: str = "http://localhost:8000"
+    similarity_threshold: float = 0.5
+    timeout: float = 5.0
+
+
+@dataclass
+class RemoteMemoryConfig:
+    """Configuration for remote HTTP trajectory memory service."""
+
+    enabled: bool = False
+    base_url: Optional[str] = None
+    auth_token: Optional[str] = None
+    similarity_threshold: float = 0.6
+    timeout: float = 10.0
+
+
+@dataclass
+class MemoryConfig:
+    """Top-level trajectory memory configuration."""
+
+    provider: str = "disabled"
+    local_http: LocalMemoryConfig = field(default_factory=LocalMemoryConfig)
+    remote_http: RemoteMemoryConfig = field(default_factory=RemoteMemoryConfig)
+
+
+@dataclass
 class ToolsConfig:
     """Tools configuration."""
 
@@ -396,6 +442,7 @@ class DroidRunConfig:
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     tracing: TracingConfig = field(default_factory=TracingConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     safe_execution: SafeExecutionConfig = field(default_factory=SafeExecutionConfig)
 
@@ -505,6 +552,14 @@ class DroidRunConfig:
             app_cards=app_cards_config,
         )
 
+        # Parse memory config
+        memory_data = data.get("memory", {})
+        memory_config = MemoryConfig(
+            provider=memory_data.get("provider", "disabled"),
+            local_http=LocalMemoryConfig(**memory_data.get("local_http", {})),
+            remote_http=RemoteMemoryConfig(**memory_data.get("remote_http", {})),
+        )
+
         # Parse safe_execution config
         safe_exec_data = data.get("safe_execution", {})
         safe_execution_config = (
@@ -520,6 +575,7 @@ class DroidRunConfig:
             telemetry=TelemetryConfig(**data.get("telemetry", {})),
             tracing=TracingConfig(**data.get("tracing", {})),
             logging=LoggingConfig(**data.get("logging", {})),
+            memory=memory_config,
             tools=ToolsConfig(**data.get("tools", {})),
             safe_execution=safe_execution_config,
         )
@@ -633,6 +689,12 @@ class ConfigManager:
         """Access logging configuration."""
         with self._lock:
             return self._config.logging
+
+    @property
+    def memory(self) -> MemoryConfig:
+        """Access trajectory memory configuration."""
+        with self._lock:
+            return self._config.memory
 
     @property
     def tools(self) -> ToolsConfig:

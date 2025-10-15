@@ -14,6 +14,7 @@ from adbutils import adb
 from rich.console import Console
 
 from droidrun.agent.droid import DroidAgent
+from droidrun.agent.memory import create_memory_client
 from droidrun.cli.logs import LogHandler
 from droidrun.config_manager import ConfigManager
 from droidrun.macro.cli import macro_cli
@@ -200,8 +201,27 @@ async def run_command(
             if config.tracing.enabled:
                 logger.info("🔍 Tracing enabled")
 
+            memory_client = create_memory_client(config=config)
+            reference_manual_str = None
+            if config.agent.reasoning and memory_client.enabled:
+                print("Checking long-term memory for similar tasks...")
+                manual_str = memory_client.fetch_reference_manual(command)
+                if manual_str:
+                    reference_manual_str = manual_str
+                    print(
+                        "Found a relevant trajectory. Providing it to the agent as a reference."
+                    )
+                else:
+                    print(
+                        "No highly similar trajectories found. Proceeding with standard planning."
+                    )
+            elif config.agent.reasoning:
+                logger.debug(
+                    "Memory service disabled; proceeding without reference trajectory."
+                )
+
             # Build DroidAgent kwargs for LLM loading
-            droid_agent_kwargs = {"runtype": "cli"}
+            droid_agent_kwargs = {"runtype": "cli", "memory_client": memory_client}
 
             # Add custom LLM parameters if provided
             if provider is not None:
@@ -220,6 +240,7 @@ async def run_command(
                 config=config,
                 excluded_tools=excluded_tools,
                 timeout=1000,
+                reference_trajectory_manual=reference_manual_str,
                 **droid_agent_kwargs,
             )
 
@@ -766,8 +787,27 @@ async def test(
             if config.tracing.enabled:
                 logger.info("🔍 Tracing enabled")
 
+            memory_client = create_memory_client(config=config)
+            reference_manual_str = None
+            if config.agent.reasoning and memory_client.enabled:
+                logger.info("Checking long-term memory for similar tasks...")
+                manual_str = memory_client.fetch_reference_manual(command)
+                if manual_str:
+                    reference_manual_str = manual_str
+                    logger.info(
+                        "Found a relevant trajectory. Providing it to the agent as a reference."
+                    )
+                else:
+                    logger.info(
+                        "No highly similar trajectories found. Proceeding with standard planning."
+                    )
+            elif config.agent.reasoning:
+                logger.debug(
+                    "Memory service disabled; proceeding without reference trajectory."
+                )
+
             # Build DroidAgent kwargs for LLM loading
-            droid_agent_kwargs = {}
+            droid_agent_kwargs = {"memory_client": memory_client}
             if temperature is not None:
                 droid_agent_kwargs["temperature"] = temperature
 
@@ -776,6 +816,7 @@ async def test(
                 config=config,
                 excluded_tools=excluded_tools,
                 timeout=1000,
+                reference_trajectory_manual=reference_manual_str,
                 **droid_agent_kwargs,
             )
 

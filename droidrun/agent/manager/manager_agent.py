@@ -11,16 +11,20 @@ This agent is responsible for:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from typing import TYPE_CHECKING
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import Context, StartEvent, StopEvent, Workflow, step
+from llama_index.core.base.llms.types import TextBlock
 
 from droidrun.agent.manager.events import ManagerInternalPlanEvent, ManagerThinkingEvent
 from droidrun.agent.manager.prompts import parse_manager_response
 from droidrun.agent.utils import convert_messages_to_chatmessages
-from droidrun.agent.utils.chat_utils import remove_empty_messages
+from droidrun.agent.utils.chat_utils import remove_empty_messages, message_copy
 from droidrun.agent.utils.device_state_formatter import format_device_state
 from droidrun.agent.utils.inference import acall_with_retries
 from droidrun.agent.utils.tools import build_custom_tool_descriptions
@@ -59,6 +63,7 @@ class ManagerAgent(Workflow):
         shared_state: "DroidAgentState",
         agent_config: "AgentConfig",
         custom_tools: dict = None,
+        reference_trajectory_manual: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -70,6 +75,7 @@ class ManagerAgent(Workflow):
         self.custom_tools = custom_tools or {}
         self.agent_config = agent_config
         self.app_card_config = self.agent_config.app_cards
+        self.reference_trajectory_manual = reference_trajectory_manual
 
         # Initialize app card provider based on mode
         self.app_card_provider: AppCardProvider = self._initialize_app_card_provider()
@@ -535,10 +541,57 @@ class ManagerAgent(Workflow):
             system_prompt=system_prompt, screenshot=screenshot
         )
 
+        if self.reference_trajectory_manual:
+            user_indices = [i for i, msg in enumerate(messages) if msg["role"] == "user"]
+            if user_indices:
+                last_user_idx = user_indices[-1]
+                content = messages[last_user_idx].setdefault("content", [])
+                content.insert(0, {"text": f"\n{self.reference_trajectory_manual}\n"})
+
         # ====================================================================
         # Step 3: Convert messages and call LLM
         # ====================================================================
         chat_messages = convert_messages_to_chatmessages(messages)
+
+        if self.reference_trajectory_manual and chat_messages:
+            chat_messages = chat_messages.copy()
+            chat_messages[-1] = message_copy(chat_messages[-1])
+            reference_block = TextBlock(text=f"\n{self.reference_trajectory_manual}\n")
+            chat_messages[-1].blocks.insert(0, reference_block)
+
+            if logger.isEnabledFor(logging.DEBUG):
+                debug_dir = Path.cwd() / "logs"
+                debug_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+                log_path = debug_dir / f"planner_messages_{ts}.json"
+                try:
+                    with log_path.open("w", encoding="utf-8") as fh:
+                        json.dump(
+                            {
+                                "reference_injected": True,
+                                "messages": [
+                                    {
+                                        "role": msg.role,
+                                        "content": [
+                                            block.model_dump()
+                                            for block in getattr(msg, "blocks", [])
+                                        ],
+                                    }
+                                    for msg in chat_messages
+                                ],
+                            },
+                            fh,
+                            indent=2,
+                        )
+                    logger.debug(
+                        "Saved planner message snapshot with reference trajectory to %s",
+                        log_path,
+                    )
+                except Exception as exc:  # pragma: no cover - best effort
+                    logger.debug(
+                        "Failed to write planner message snapshot: %s",
+                        exc,
+                    )
 
         try:
             response = await acall_with_retries(self.llm, chat_messages)
