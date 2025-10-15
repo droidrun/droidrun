@@ -46,25 +46,23 @@ def download_portal_apk(debug: bool = False):
     asset_version = None
     asset_url = None
     for asset in assets:
-        if (
-            "browser_download_url" in asset
-            and "name" in asset
-            and asset["name"].startswith(ASSET_NAME)
-        ):
-            asset_url = asset["browser_download_url"]
-            asset_version = asset["name"].split("-")[-1]
-            asset_version = asset_version.removesuffix(".apk")
-            break
-        elif "downloadUrl" in asset and os.path.basename(
-            asset["downloadUrl"]
-        ).startswith(ASSET_NAME):
-            asset_url = asset["downloadUrl"]
-            asset_version: str = asset["name"].split("-")[-1]
-            asset_version = asset_version.removesuffix(".apk")
-            break
-        else:
-            if debug:
-                print(asset)
+        if debug:
+            print(f"Inspecting asset: {asset}")
+
+        name = asset.get("name")
+        download_url = asset.get("browser_download_url") or asset.get("downloadUrl")
+
+        if not download_url:
+            continue
+
+        candidate_name = name or os.path.basename(download_url)
+        if not candidate_name.startswith(ASSET_NAME):
+            continue
+
+        asset_url = download_url
+        asset_version = candidate_name.split("-")[-1]
+        asset_version = asset_version.removesuffix(".apk")
+        break
 
     if not asset_url:
         raise Exception(f"Asset named '{ASSET_NAME}' not found in the latest release.")

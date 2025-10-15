@@ -148,6 +148,18 @@ class DroidAgent(Workflow):
         # Create tools from config
         tools = create_tools_from_config(self.config.device)
 
+        llm_override_keys = [
+            "custom_provider",
+            "custom_model",
+            "temperature",
+            "base_url",
+            "api_base",
+        ]
+        llm_kwargs = {}
+        for key in llm_override_keys:
+            if key in kwargs:
+                llm_kwargs[key] = kwargs.pop(key)
+
         super().__init__(*args, timeout=timeout, **kwargs)
 
         self._configure_default_logging(debug=self.config.logging.debug)
@@ -162,7 +174,7 @@ class DroidAgent(Workflow):
 
             logger.info("🔄 Loading LLMs from config (llms not provided)...")
 
-            llms = load_agent_llms(config=self.config, **kwargs)
+            llms = load_agent_llms(config=self.config, **llm_kwargs)
         validate_llm_dict(self.config, llms)
 
         if self.config.tracing.enabled:
