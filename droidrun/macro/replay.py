@@ -121,7 +121,7 @@ class MacroPlayer:
                 logger.info(
                     f"👆 Dragging from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration_ms} milliseconds"
                 )
-                result = tools.drag(start_x, start_y, end_x, end_y, duration_ms)
+                result = tools.drag(start_x, start_y, end_x, end_y, duration_ms / 1000.0)
                 logger.debug(f"   Result: {result}")
                 return True
 

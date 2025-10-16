@@ -169,6 +169,14 @@ class ManagerAgent(Workflow):
                 )
             ]
 
+        # Get available secrets from credential manager
+        available_secrets = []
+        if (
+            hasattr(self.tools_instance, "credential_manager")
+            and self.tools_instance.credential_manager
+        ):
+            available_secrets = self.tools_instance.credential_manager.list_available_secrets()
+
         # Let Jinja2 handle all formatting and conditionals
         return PromptLoader.load_prompt(
             self.agent_config.get_manager_system_prompt_path(),
@@ -184,6 +192,8 @@ class ManagerAgent(Workflow):
                 ),
                 "scripter_execution_enabled": self.agent_config.scripter.enabled,
                 "scripter_max_steps": self.agent_config.scripter.max_steps,
+                "available_secrets": available_secrets,
+                "variables": self.shared_state.custom_variables,
             },
         )
 

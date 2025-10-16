@@ -1,0 +1,766 @@
+---
+title: 'App-Specific Instruction Cards'
+description: 'Enhance agent performance with app-specific guidance and best practices'
+---
+
+# App-Specific Instruction Cards
+
+DroidRun's app card system provides app-specific guidance to agents, helping them understand how to operate specific apps more effectively. App cards are automatically loaded based on the currently active app and injected into agent prompts to improve task success rates.
+
+## Overview
+
+App cards are markdown documents that contain:
+
+- **Navigation tips**: How to navigate through the app's UI
+- **Common actions**: Step-by-step guides for frequent tasks
+- **UI patterns**: App-specific interaction patterns and conventions
+- **Known gotchas**: Quirks, issues, or important notes about the app
+- **Search syntax**: Special search operators or filters (for apps like Gmail, file managers, etc.)
+
+When a DroidRun agent detects it's operating within a specific app (by package name), it automatically loads the corresponding app card and uses that knowledge to make better decisions.
+
+---
+
+## How App Cards Work
+
+### Automatic Detection and Loading
+
+1. **Package Detection**: DroidRun monitors the current foreground app package name (e.g., "com.google.android.gm" for Gmail)
+2. **Card Loading**: When the package changes, DroidRun looks up the corresponding app card
+3. **Prompt Injection**: The app card content is injected into the agent's system prompt within `<app_card>` tags
+4. **Context-Aware Actions**: The agent uses the app-specific guidance to perform actions more effectively
+
+### When App Cards Are Used
+
+App cards are used by the **Manager Agent** in reasoning mode (`--reasoning` flag). The Manager uses app cards to:
+
+- Plan multi-step workflows that align with the app's UI structure
+- Make informed decisions about navigation and action sequences
+- Understand app-specific features and capabilities
+- Avoid common pitfalls and known issues
+
+---
+
+## Built-in App Cards
+
+DroidRun ships with app cards for popular apps. Currently included:
+
+| App | Package Name | Features Covered |
+|-----|--------------|------------------|
+| **Gmail** | `com.google.android.gm` | Navigation, search filters, composing emails, organizing messages, folder management |
+
+More app cards are continuously added. Check `/home/pixel/Desktop/projects/droidrun/droidrun/droidrun/config/app_cards/` for the latest list.
+
+---
+
+## App Card Format
+
+App cards are stored as markdown files and mapped to package names via `app_cards.json`.
+
+### Directory Structure
+
+```
+config/app_cards/
+├── app_cards.json       # Package name → file mapping
+├── gmail.md             # Gmail app card
+├── chrome.md            # Chrome app card (example)
+└── social/              # Organize in subdirectories
+    ├── whatsapp.md
+    └── instagram.md
+```
+
+### Mapping File (app_cards.json)
+
+The `app_cards.json` file maps Android package names to markdown files:
+
+```json
+{
+  "com.google.android.gm": "gmail.md",
+  "com.android.chrome": "chrome.md",
+  "com.whatsapp": "social/whatsapp.md",
+  "com.instagram.android": "social/instagram.md"
+}
+```
+
+### Markdown File Structure
+
+App card markdown files should follow this structure:
+
+```markdown
+# App Name Guide
+
+## Navigation
+- How to navigate the app
+- Key screens and menus
+- Drawer/hamburger menu contents
+
+## Search
+- How to use search functionality
+- Special search operators or filters
+- Tips for finding specific content
+
+## Common Actions
+- **Action Name**: Step-by-step guide
+- **Another Action**: How to perform it
+- Use bullet points for clarity
+
+## Composing/Creating Content
+- How to create new items (emails, posts, documents, etc.)
+- Where to find creation buttons
+- Required vs. optional fields
+
+## Tips
+- App-specific tips
+- Known issues or quirks
+- Performance considerations
+- Best practices
+```
+
+### Example: Gmail App Card
+
+Here's the complete Gmail app card (`gmail.md`):
+
+```markdown
+# Gmail App Guide
+
+## Navigation
+- Use the hamburger menu (top-left) to access folders (Inbox, Sent, Drafts, Trash, etc.)
+- Tap the compose button (bottom-right floating action button) to write new emails
+- Swipe left or right on emails to quickly archive or delete
+
+## Search
+- Use the search bar at the top to find emails
+- Search supports filters like:
+  - `from:sender@email.com` - Find emails from specific sender
+  - `to:recipient@email.com` - Find emails to specific recipient
+  - `subject:keyword` - Search in subject line
+  - `has:attachment` - Find emails with attachments
+  - `is:unread` - Find unread emails
+
+## Common Actions
+- **Archive**: Swipe right on an email in the list
+- **Delete**: Swipe left on an email in the list
+- **Select Multiple**: Long press on an email to enter selection mode
+- **Star/Unstar**: Tap the star icon next to an email
+- **Mark as Read/Unread**: Long press → Select → Tap the mark read/unread icon
+- **Move to Folder**: Long press → Select → Tap the folder icon
+
+## Composing Emails
+- Tap the floating compose button (bottom-right)
+- Fill in recipient, subject, and body
+- Attach files by tapping the paperclip icon
+- Send by tapping the send button (paper plane icon) in the top-right
+
+## Tips
+- Primary inbox shows important emails automatically
+- Social and Promotions tabs filter promotional and social emails
+- Enable notifications for important emails only
+- Use labels to organize emails
+```
+
+---
+
+## Creating Custom App Cards
+
+### Step 1: Find the Package Name
+
+To create an app card, you first need the app's package name.
+
+**Using ADB:**
+```sh
+# List all packages
+adb shell pm list packages
+
+# Search for specific app
+adb shell pm list packages | grep keyword
+
+# Get the current foreground app
+adb shell dumpsys window windows | grep -E 'mCurrentFocus'
+```
+
+**Using DroidRun Debug Mode:**
+```sh
+# Run DroidRun with debug logging
+droidrun run "Open the app" --debug
+
+# The package name will appear in logs when the app is opened
+```
+
+**Common Package Names:**
+- Gmail: `com.google.android.gm`
+- Chrome: `com.android.chrome`
+- WhatsApp: `com.whatsapp`
+- Instagram: `com.instagram.android`
+- Facebook: `com.facebook.katana`
+- YouTube: `com.google.android.youtube`
+- Google Maps: `com.google.android.apps.maps`
+
+### Step 2: Create the Markdown File
+
+Create a markdown file in your app cards directory:
+
+```sh
+# In your working directory
+mkdir -p config/app_cards
+touch config/app_cards/myapp.md
+```
+
+Fill the file with app-specific guidance following the structure shown above.
+
+### Step 3: Update app_cards.json
+
+Add an entry to `app_cards.json`:
+
+```json
+{
+  "com.google.android.gm": "gmail.md",
+  "com.myapp.package": "myapp.md"
+}
+```
+
+### Step 4: Test the App Card
+
+Run DroidRun with the app and verify the app card is loaded:
+
+```sh
+droidrun run "Open myapp and do something" --reasoning --debug
+```
+
+Look for log messages like:
+```
+Loaded app_cards.json with 2 entries
+Loaded app card for com.myapp.package from config/app_cards/myapp.md
+```
+
+---
+
+## Configuration
+
+App cards are configured in `config.yaml` under the `agent.app_cards` section:
+
+```yaml
+agent:
+  app_cards:
+    # Enable app-specific instruction cards
+    enabled: true
+
+    # Mode: local, server, or composite
+    mode: local
+
+    # Directory containing app card files (for local/composite modes)
+    app_cards_dir: config/app_cards
+
+    # Server URL for remote app cards (for server/composite modes)
+    server_url: null
+
+    # Server request timeout in seconds
+    server_timeout: 10.0
+
+    # Number of server retry attempts
+    server_max_retries: 2
+```
+
+### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | Boolean | `true` | Enable/disable app card system |
+| `mode` | String | `"local"` | Provider mode: `local`, `server`, or `composite` |
+| `app_cards_dir` | String | `"config/app_cards"` | Directory containing local app card files |
+| `server_url` | String | `null` | Base URL for remote app card server |
+| `server_timeout` | Float | `10.0` | HTTP request timeout (seconds) |
+| `server_max_retries` | Integer | `2` | Number of retry attempts for server requests |
+
+### Disabling App Cards
+
+To disable app cards entirely:
+
+```yaml
+agent:
+  app_cards:
+    enabled: false
+```
+
+Or via CLI flag (if supported):
+```sh
+# Configuration-only feature, modify config.yaml
+```
+
+---
+
+## Card Providers
+
+DroidRun supports three types of app card providers:
+
+### 1. LocalProvider (Default)
+
+Loads app cards from the local filesystem.
+
+**Use case:** Most common use case for personal or team-specific app cards.
+
+**Configuration:**
+```yaml
+agent:
+  app_cards:
+    mode: local
+    app_cards_dir: config/app_cards
+```
+
+**Features:**
+- Fast loading (local files)
+- In-memory caching
+- No network dependency
+- Custom app cards in your working directory
+
+**Path Resolution:**
+- Checks working directory first: `./config/app_cards/`
+- Falls back to package directory: `<droidrun-package>/config/app_cards/`
+
+### 2. ServerProvider
+
+Fetches app cards from a remote HTTP server.
+
+**Use case:** Centralized app card management, dynamic card updates, team collaboration.
+
+**Configuration:**
+```yaml
+agent:
+  app_cards:
+    mode: server
+    server_url: https://api.example.com
+    server_timeout: 10.0
+    server_max_retries: 2
+```
+
+**API Specification:**
+
+**Endpoint:** `POST /app-cards`
+
+**Request:**
+```json
+{
+  "package_name": "com.google.android.gm",
+  "instruction": "Send an email to john@example.com"
+}
+```
+
+**Response (Success):**
+```json
+{
+  "app_card": "# Gmail App Guide\n\n## Navigation\n..."
+}
+```
+
+**Response (Not Found):**
+```json
+{
+  "app_card": ""
+}
+```
+Status Code: `404`
+
+**Features:**
+- Centralized card management
+- Dynamic updates without redeploying
+- Context-aware cards (uses `instruction` parameter)
+- Retry logic with exponential backoff
+- In-memory caching
+
+### 3. CompositeProvider
+
+Tries server first, falls back to local files if server fails or returns empty.
+
+**Use case:** Best of both worlds - server-managed cards with local fallback.
+
+**Configuration:**
+```yaml
+agent:
+  app_cards:
+    mode: composite
+    server_url: https://api.example.com
+    app_cards_dir: config/app_cards
+    server_timeout: 10.0
+    server_max_retries: 2
+```
+
+**Features:**
+- High availability (fallback to local)
+- Prioritizes server cards (can be context-aware)
+- Automatic fallback on server errors
+- Combined caching strategy
+
+**Fallback Flow:**
+1. Try server (with retries)
+2. If server fails or returns empty, try local
+3. Return first non-empty result
+4. Cache the result
+
+---
+
+## Examples
+
+### Example 1: Custom App Cards Directory
+
+Create app cards in a custom location:
+
+**Directory structure:**
+```
+my_project/
+├── droidrun_cards/
+│   ├── app_cards.json
+│   ├── myapp.md
+│   └── otherapp.md
+└── config.yaml
+```
+
+**config.yaml:**
+```yaml
+agent:
+  app_cards:
+    enabled: true
+    mode: local
+    app_cards_dir: droidrun_cards
+```
+
+### Example 2: Programmatic App Card Loading
+
+Use app card providers directly in Python:
+
+```python
+import asyncio
+from droidrun.app_cards.providers import LocalAppCardProvider
+
+async def main():
+    # Initialize provider
+    provider = LocalAppCardProvider(app_cards_dir="config/app_cards")
+
+    # Load app card for Gmail
+    gmail_card = await provider.load_app_card(
+        package_name="com.google.android.gm"
+    )
+
+    if gmail_card:
+        print("Gmail app card loaded:")
+        print(gmail_card)
+    else:
+        print("No app card found for Gmail")
+
+    # Get cache statistics
+    stats = provider.get_cache_stats()
+    print(f"Cached entries: {stats['content_entries']}")
+    print(f"Mapping entries: {stats['mapping_entries']}")
+
+    # Clear cache (useful for testing)
+    provider.clear_cache()
+
+asyncio.run(main())
+```
+
+### Example 3: Using Server Provider
+
+Set up a server provider to fetch cards from a remote API:
+
+```python
+import asyncio
+from droidrun.app_cards.providers import ServerAppCardProvider
+
+async def main():
+    # Initialize server provider
+    provider = ServerAppCardProvider(
+        server_url="https://api.droidrun.ai",
+        timeout=5.0,
+        max_retries=3
+    )
+
+    # Load app card from server
+    app_card = await provider.load_app_card(
+        package_name="com.spotify.music",
+        # useful if the server has the app cards in graphrag structure.
+        instruction="Play a specific song"
+    )
+
+    print(app_card)
+
+asyncio.run(main())
+```
+
+### Example 4: Composite Provider with Fallback
+
+Use composite provider for resilience:
+
+```python
+import asyncio
+from droidrun.app_cards.providers import CompositeAppCardProvider
+
+async def main():
+    # Initialize composite provider
+    provider = CompositeAppCardProvider(
+        server_url="https://api.droidrun.ai",
+        app_cards_dir="config/app_cards",
+        server_timeout=2.0,
+        server_max_retries=2
+    )
+
+    # Load app card (tries server first, falls back to local)
+    app_card = await provider.load_app_card(
+        package_name="com.google.android.gm",
+        instruction="Send an email with attachment"
+    )
+
+    print(app_card)
+
+    # Get statistics from both providers
+    stats = provider.get_cache_stats()
+    print(f"Server cache: {stats['server']}")
+    print(f"Local cache: {stats['local']}")
+
+asyncio.run(main())
+```
+
+### Example 5: Complete DroidAgent with Custom App Cards
+
+```python
+import asyncio
+from droidrun import DroidAgent
+from droidrun.tools import AdbTools
+from droidrun.config_manager import ConfigManager
+from droidrun.llm_utils import load_llm
+
+async def main():
+    # Load configuration with custom app cards
+    config = ConfigManager()
+    config.agent.app_cards.enabled = True
+    config.agent.app_cards.mode = "local"
+    config.agent.app_cards.app_cards_dir = "my_custom_cards"
+
+    # Load LLM
+    llm = load_llm("GoogleGenAI", "models/gemini-2.5-pro")
+
+    # Create agent
+    agent = DroidAgent(
+        goal="Send an email to john@example.com with subject 'Meeting tomorrow'",
+        llms=llm,
+        tools=AdbTools(),
+        config=config,
+    )
+
+    # Run agent (app card will be loaded automatically when Gmail is opened)
+    result = await agent.run()
+    print(result)
+
+asyncio.run(main())
+```
+
+---
+
+## Best Practices
+
+### 1. Be Concise and Actionable
+
+App cards should be brief and focused on actionable guidance:
+
+**Good:**
+```markdown
+## Navigation
+- Tap hamburger menu (top-left) to access folders
+- Use search bar at top to find emails
+```
+
+**Bad:**
+```markdown
+## Navigation
+The Gmail app has a very sophisticated navigation system. You can use the hamburger menu, which is located in the top-left corner of the screen, to access various folders. The app organizes emails into different categories...
+```
+
+### 2. Use Examples for Complex Features
+
+For features with special syntax or complex interactions, show examples:
+
+```markdown
+## Search
+- Search supports filters:
+  - `from:sender@email.com` - Find emails from specific sender
+  - `subject:meeting` - Search in subject line
+  - `has:attachment` - Find emails with attachments
+  - Combine: `from:boss@company.com has:attachment` - Find all emails with attachments from your boss
+```
+
+### 3. Focus on Agent-Relevant Information
+
+Include information that helps agents **act**, not just understand:
+
+**Good (actionable):**
+```markdown
+## Composing Emails
+- Tap the floating compose button (bottom-right)
+- Recipient field is at top, tap to enter email address
+- Subject is second field, below recipient
+- Body is large text area at bottom
+- Send button is in top-right corner (paper plane icon)
+```
+
+**Bad (descriptive, not actionable):**
+```markdown
+## Composing Emails
+Gmail has a compose feature that allows users to write emails. The compose button is usually visible on the main screen. Users can enter various fields when composing.
+```
+
+### 4. Update Regularly
+
+Keep app cards current with app updates:
+
+- Review app cards when apps receive major updates
+- Test agent performance periodically
+- Update navigation paths if UI changes
+- Add new features as they're released
+
+### 5. Organize by Categories
+
+For large apps, use subdirectories to organize cards:
+
+```
+config/app_cards/
+├── app_cards.json
+├── productivity/
+│   ├── gmail.md
+│   ├── calendar.md
+│   └── drive.md
+├── social/
+│   ├── whatsapp.md
+│   ├── instagram.md
+│   └── facebook.md
+└── banking/
+    ├── chase.md
+    └── wellsfargo.md
+```
+
+### 6. Test App Cards
+
+After creating or updating app cards, test them:
+
+```sh
+# Run agent with reasoning mode (uses app cards)
+droidrun run "Perform task in the app" --reasoning --debug
+
+# Check logs for app card loading
+# Verify agent performance improves with the card
+```
+
+### 7. Include Known Issues
+
+Document quirks or known issues to help agents avoid common pitfalls:
+
+```markdown
+## Known Issues
+- The "Submit" button in the feedback form doesn't work - use the floating action button instead
+- Swipe gestures are disabled on the home screen - use the navigation drawer menu
+- The search icon in the toolbar is non-functional - use the search bar at the bottom of the screen
+- "Add to Cart" button requires a double-tap to register (single tap shows no response)
+```
+
+### 8. Use Consistent Formatting
+
+Maintain consistent formatting across all app cards:
+
+- Use `#` for app name
+- Use `##` for sections
+- Use `-` for bullet points
+- Use `**bold**` for action names
+- Use `backticks` for special syntax or UI element names
+
+### 9. Version Control
+
+Store app cards in version control:
+
+```sh
+git add config/app_cards/
+git commit -m "Add app card for MyApp v2.0"
+```
+
+This allows:
+- Tracking changes over time
+- Rolling back problematic updates
+- Collaborating with team members
+- Syncing cards across machines
+
+---
+
+## Troubleshooting
+
+### App card not loading
+
+**Problem:** Agent doesn't seem to use app card guidance.
+
+**Solution:**
+1. Verify app cards are enabled in config:
+   ```yaml
+   agent:
+     app_cards:
+       enabled: true
+   ```
+
+2. Check package name mapping in `app_cards.json`:
+   ```sh
+   # Get current package name
+   adb shell dumpsys window windows | grep -E 'mCurrentFocus'
+   ```
+
+3. Verify file exists at specified path:
+   ```sh
+   ls config/app_cards/myapp.md
+   ```
+
+4. Check debug logs for loading messages:
+   ```sh
+   droidrun run "Your command" --reasoning --debug
+   ```
+
+### Package name not recognized
+
+**Problem:** App card exists but isn't loaded for the app.
+
+**Solution:**
+- Double-check package name (case-sensitive)
+- Some apps have different package names than expected
+- Verify mapping in `app_cards.json` matches exactly
+
+### Server provider timeout
+
+**Problem:** Server requests timing out.
+
+**Solution:**
+```yaml
+agent:
+  app_cards:
+    server_timeout: 20.0  # Increase timeout
+    server_max_retries: 5  # More retries
+```
+
+Or switch to composite mode for local fallback:
+```yaml
+agent:
+  app_cards:
+    mode: composite  # Falls back to local on server failure
+```
+
+### App card not updating
+
+**Problem:** Changes to app card file aren't reflected.
+
+**Solution:**
+- App cards are cached in memory during agent execution
+- Restart the agent process to reload app cards
+- For programmatic usage, call `provider.clear_cache()`
+
+---
+
+## Related Documentation
+
+- [CLI Usage](/docs/v4/guides/cli) - DroidRun CLI command reference
+- [Configuration](/docs/v4/concepts/configuration) - Configuration system details
+- [Agent Architecture](/docs/v4/concepts/architecture) - How agents use app cards
+- [Manager Agent](/docs/v4/sdk/droid-agent#manager-agent) - Agent that uses app cards
+
+---
+
+**Improve your agent's performance with well-crafted app cards!**

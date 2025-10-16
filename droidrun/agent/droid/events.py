@@ -114,6 +114,9 @@ class DroidAgentState(BaseModel):
     # Output
     output_dir: str = ""
 
+    # Custom variables (user-defined)
+    custom_variables: Dict = Field(default_factory=dict)
+
     def update_current_app(self, package_name: str, activity_name: str):
         """
         Update package and activity together, capturing telemetry event only once.

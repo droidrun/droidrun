@@ -72,6 +72,17 @@ The executor has access to these additional custom actions beyond the standard a
 You can reference these custom actions or tell the Executer agent to use them in your plan when they help achieve the user's goal.
 </custom_actions>
 {% endif %}
+{% if available_secrets %}
+
+<available_secrets>
+The executor has access to the following secret IDs via the type_secret custom action:
+{% for secret_id in available_secrets %}
+- {{ secret_id }}
+{% endfor %}
+
+You can include these secret IDs in your plan when the task requires entering sensitive information (passwords, API keys, etc.). The executor will use `type_secret(secret_id, index)` to type them securely without exposing values.
+</available_secrets>
+{% endif %}
 {% if scripter_execution_enabled %}
 
 <scripter_execution>

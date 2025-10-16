@@ -36,6 +36,7 @@ class AdbTools(Tools):
         remote_tcp_port: int = PORTAL_DEFAULT_TCP_PORT,
         app_opener_llm=None,
         text_manipulator_llm=None,
+        credential_manager=None,
     ) -> None:
         """Initialize the AdbTools instance.
 
@@ -45,6 +46,7 @@ class AdbTools(Tools):
             tcp_port: TCP port for communication (default: 8080)
             app_opener_llm: LLM instance for app opening workflow (optional)
             text_manipulator_llm: LLM instance for text manipulation (optional)
+            credential_manager: CredentialManager instance for secret handling (optional)
         """
         self.device = adb.device(serial=serial)
 
@@ -67,6 +69,9 @@ class AdbTools(Tools):
         # LLM instances for specialized workflows
         self.app_opener_llm = app_opener_llm
         self.text_manipulator_llm = text_manipulator_llm
+
+        # Credential manager for secret handling
+        self.credential_manager = credential_manager
 
         # Set up keyboard
         from droidrun.portal import setup_keyboard

@@ -14,6 +14,52 @@
         "tab": "Framework",
         "versions": [
           {
+            "version": "0.4.0",
+            "groups": [
+              {
+                "group": "Get Started",
+                "pages": [
+                  "v4/overview",
+                  "v4/quickstart"
+                ]
+              },
+              {
+                "group": "Concepts",
+                "pages": [
+                  "v4/concepts/agent",
+                  "v4/concepts/architecture",
+                  "v4/concepts/configuration",
+                  "v4/concepts/models",
+                  "v4/concepts/android-tools",
+                  "v4/concepts/ios-tools",
+                  "v4/concepts/portal-app"
+                ]
+              },
+              {
+                "group": "Guides",
+                "pages": [
+                  "v4/guides/cli",
+                  "v4/guides/app-cards",
+                  "v4/guides/device-management",
+                  "v4/guides/event-streaming",
+                  "v4/guides/macros",
+                  "v4/guides/trajectories",
+                  "v4/guides/prompt-customization",
+                  "v4/guides/advanced-configuration",
+                  "v4/guides/telemetry"
+                ]
+              },
+              {
+                "group": "SDK Reference",
+                "pages": [
+                  "v4/sdk/droid-agent",
+                  "v4/sdk/adb-tools",
+                  "v4/sdk/ios-tools"
+                ]
+              }
+            ]
+          },
+          {
             "version": "0.3.8",
             "groups": [
               {
@@ -95,15 +141,6 @@
                 ]
               }
             ]
-          }
-        ]
-      },
-      {
-        "tab": "Cloud API",
-        "versions": [
-          {
-            "version": "0.1.0",
-            "openapi": "https://api.droidrun.ai/v1/openapi.json"
           }
         ]
       }

@@ -110,6 +110,8 @@ async def run_command(
     ios: bool = False,
     allow_drag: bool | None = None,
     temperature: float | None = None,
+    cloud: bool | None = None,
+    cloud_apps: tuple | None = None,
     **kwargs,
 ):
     """Run a command on your Android device using natural language."""
@@ -160,6 +162,10 @@ async def run_command(
                 config.device.serial = device
             if use_tcp is not None:
                 config.device.use_tcp = use_tcp
+            if cloud is not None:
+                config.device.use_cloud = cloud
+            if cloud_apps is not None and cloud_apps:
+                config.device.cloud_apps = list(cloud_apps)
 
             # Tools overrides
             if allow_drag is not None:
@@ -184,8 +190,6 @@ async def run_command(
             # ================================================================
 
             log_handler.update_step("Initializing DroidAgent...")
-
-            excluded_tools = [] if config.tools.allow_drag else ["drag"]
 
             mode = (
                 "planning with reasoning"
@@ -238,7 +242,6 @@ async def run_command(
             droid_agent = DroidAgent(
                 goal=command,
                 config=config,
-                excluded_tools=excluded_tools,
                 timeout=1000,
                 reference_trajectory_manual=reference_manual_str,
                 **droid_agent_kwargs,
@@ -323,25 +326,23 @@ class DroidRunCLI(click.Group):
     default=None,
 )
 @click.option(
-    "--vision",
-    is_flag=True,
+    "--vision/--no-vision",
+    default=None,
     help="Enable vision capabilites by using screenshots",
-    default=False,
 )
 @click.option(
-    "--reasoning", is_flag=True, help="Enable planning with reasoning", default=False
+    "--reasoning/--no-reasoning", default=None, help="Enable planning with reasoning"
 )
 @click.option(
-    "--tracing", is_flag=True, help="Enable Arize Phoenix tracing", default=False
+    "--tracing/--no-tracing", default=None, help="Enable Arize Phoenix tracing"
 )
 @click.option(
-    "--debug", is_flag=True, help="Enable verbose debug logging", default=False
+    "--debug/--no-debug", default=None, help="Enable verbose debug logging"
 )
 @click.option(
-    "--use-tcp",
-    is_flag=True,
+    "--use-tcp/--no-use-tcp",
+    default=None,
     help="Use TCP communication for device control",
-    default=False,
 )
 @click.option(
     "--save-trajectory",
@@ -351,19 +352,6 @@ class DroidRunCLI(click.Group):
 )
 @click.group(cls=DroidRunCLI)
 def cli(
-    device: str | None,
-    provider: str,
-    model: str,
-    steps: int,
-    base_url: str,
-    api_base: str,
-    temperature: float,
-    vision: bool,
-    reasoning: bool,
-    tracing: bool,
-    debug: bool,
-    use_tcp: bool,
-    save_trajectory: str = "none",
 ):
     """DroidRun - Control your Android device through LLM agents."""
     pass
@@ -399,41 +387,21 @@ def cli(
     default=None,
 )
 @click.option(
-    "--vision",
-    is_flag=True,
+    "--vision/--no-vision",
     default=None,
     help="Enable vision capabilites by using screenshots for all agents.",
 )
 @click.option(
-    "--manager-vision",
-    is_flag=True,
-    default=None,
-    help="Enable vision for Manager agent only",
+    "--reasoning/--no-reasoning", default=None, help="Enable planning with reasoning"
 )
 @click.option(
-    "--executor-vision",
-    is_flag=True,
-    default=None,
-    help="Enable vision for Executor agent only",
+    "--tracing/--no-tracing", default=None, help="Enable Arize Phoenix tracing"
 )
 @click.option(
-    "--codeact-vision",
-    is_flag=True,
-    default=None,
-    help="Enable vision for CodeAct agent only",
+    "--debug/--no-debug", default=None, help="Enable verbose debug logging"
 )
 @click.option(
-    "--reasoning", is_flag=True, default=None, help="Enable planning with reasoning"
-)
-@click.option(
-    "--tracing", is_flag=True, default=None, help="Enable Arize Phoenix tracing"
-)
-@click.option(
-    "--debug", is_flag=True, default=None, help="Enable verbose debug logging"
-)
-@click.option(
-    "--use-tcp",
-    is_flag=True,
+    "--tcp/--no-tcp",
     default=None,
     help="Use TCP communication for device control",
 )
@@ -443,14 +411,18 @@ def cli(
     help="Trajectory saving level: none (no saving), step (save per step), action (save per action)",
     default=None,
 )
-@click.option(
-    "--drag",
-    "allow_drag",
-    is_flag=True,
-    default=None,
-    help="Enable drag tool",
-)
 @click.option("--ios", type=bool, default=None, help="Run on iOS device")
+@click.option(
+    "--cloud/--no-cloud",
+    default=None,
+    help="Use cloud devices",
+)
+@click.option(
+    "--cloud-apps",
+    multiple=True,
+    default=None,
+    help="Apps to pre-install on cloud device (can be used multiple times)",
+)
 def run(
     command: str,
     config: str | None,
@@ -462,16 +434,14 @@ def run(
     api_base: str | None,
     temperature: float | None,
     vision: bool | None,
-    manager_vision: bool | None,
-    executor_vision: bool | None,
-    codeact_vision: bool | None,
     reasoning: bool | None,
     tracing: bool | None,
     debug: bool | None,
-    use_tcp: bool | None,
+    tcp: bool | None,
     save_trajectory: str | None,
-    allow_drag: bool | None,
     ios: bool | None,
+    cloud: bool | None,
+    cloud_apps: tuple | None,
 ):
     """Run a command on your Android device using natural language."""
 
@@ -486,17 +456,15 @@ def run(
             base_url,
             api_base,
             vision,
-            manager_vision,
-            executor_vision,
-            codeact_vision,
             reasoning,
             tracing,
             debug,
-            use_tcp,
+            tcp,
             temperature=temperature,
             save_trajectory=save_trajectory,
-            allow_drag=allow_drag,
             ios=ios if ios is not None else False,
+            cloud=cloud,
+            cloud_apps=cloud_apps,
         )
     finally:
         # Disable DroidRun keyboard after execution
@@ -656,35 +624,38 @@ def setup(path: str | None, device: str | None, debug: bool):
 @cli.command()
 @click.option("--device", "-d", help="Device serial number or IP address", default=None)
 @click.option(
-    "--use-tcp",
-    is_flag=True,
+    "--tcp/--no-tcp",
+    default=None,
     help="Use TCP communication for device control",
-    default=False,
 )
 @click.option(
-    "--debug", is_flag=True, help="Enable verbose debug logging", default=False
+    "--debug/--no-debug", default=None, help="Enable verbose debug logging"
 )
-def ping(device: str | None, use_tcp: bool, debug: bool):
+def ping(device: str | None, tcp: bool | None, debug: bool | None):
     """Ping a device to check if it is ready and accessible."""
+    # Handle None defaults
+    debug_mode = debug if debug is not None else False
+    use_tcp_mode = tcp if tcp is not None else False
+    
     try:
         device_obj = adb.device(device)
         if not device_obj:
             console.print(f"[bold red]Error:[/] Could not find device {device}")
             return
 
-        ping_portal(device_obj, debug)
+        ping_portal(device_obj, debug_mode)
 
-        if use_tcp:
-            ping_portal_tcp(device_obj, debug)
+        if use_tcp_mode:
+            ping_portal_tcp(device_obj, debug_mode)
         else:
-            ping_portal_content(device_obj, debug)
+            ping_portal_content(device_obj, debug_mode)
 
         console.print(
             "[bold green]Portal is installed and accessible. You're good to go![/]"
         )
     except Exception as e:
         console.print(f"[bold red]Error:[/] {e}")
-        if debug:
+        if debug_mode:
             import traceback
 
             traceback.print_exc()
@@ -707,6 +678,8 @@ async def test(
     allow_drag: bool | None = None,
     temperature: float | None = None,
     ios: bool = False,
+    cloud: bool | None = None,
+    cloud_apps: tuple | None = None,
 ):
     config_manager = ConfigManager(path="config.yaml")
     config = config_manager.config
@@ -746,6 +719,10 @@ async def test(
                 config.device.serial = device
             if use_tcp is not None:
                 config.device.use_tcp = use_tcp
+            if cloud is not None:
+                config.device.use_cloud = cloud
+            if cloud_apps is not None and cloud_apps:
+                config.device.cloud_apps = list(cloud_apps)
 
             # Tools overrides
             if allow_drag is not None:
@@ -770,8 +747,6 @@ async def test(
             # ================================================================
 
             log_handler.update_step("Initializing DroidAgent...")
-
-            excluded_tools = [] if config.tools.allow_drag else ["drag"]
 
             mode = (
                 "planning with reasoning"
@@ -814,7 +789,6 @@ async def test(
             droid_agent = DroidAgent(
                 goal=command,
                 config=config,
-                excluded_tools=excluded_tools,
                 timeout=1000,
                 reference_trajectory_manual=reference_manual_str,
                 **droid_agent_kwargs,

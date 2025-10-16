@@ -2,8 +2,8 @@ import time
 from typing import TYPE_CHECKING, List
 
 if TYPE_CHECKING:
+    from droidrun.config_manager.config_manager import DeviceConfig, ToolsConfig
     from droidrun.tools import Tools
-    from droidrun.config_manager.config_manager import DeviceConfig
 
 from droidrun.agent.oneflows.app_starter_workflow import AppStarter
 
@@ -16,7 +16,7 @@ def create_tools_from_config(device_config: "DeviceConfig") -> "Tools":
         device_config: Device configuration
 
     Returns:
-        AdbTools or IOSTools based on config.platform
+        AdbTools, CloudAdbTools, or IOSTools based on config
 
     Raises:
         ValueError: If no device found or invalid platform
@@ -28,6 +28,12 @@ def create_tools_from_config(device_config: "DeviceConfig") -> "Tools":
     device_serial = device_config.serial
 
     if not is_ios:
+        # Check if using cloud devices
+        if device_config.use_cloud:
+            from droidrun.tools.cloud_adb import CloudAdbTools
+
+            return CloudAdbTools(device_config=device_config)
+
         # Android: auto-detect if not specified
         if device_serial is None:
             devices = adb.list()
@@ -44,6 +50,68 @@ def create_tools_from_config(device_config: "DeviceConfig") -> "Tools":
         if device_serial is None:
             raise ValueError("iOS device URL required in config.device.serial")
         return IOSTools(url=device_serial)
+
+
+def resolve_tools_instance(
+    tools: "Tools | ToolsConfig | None",
+    device_config: "DeviceConfig",
+    tools_config_fallback: "ToolsConfig | None" = None,
+    credential_manager=None,
+) -> tuple["Tools", "ToolsConfig"]:
+    """
+    Resolve Tools instance and ToolsConfig from various input types.
+
+    This helper allows flexible initialization:
+    - Pass a Tools instance directly (custom or pre-configured)
+    - Pass a ToolsConfig to create Tools from device_config
+    - Pass None to use defaults
+
+    Args:
+        tools: Either a Tools instance, ToolsConfig, or None
+        device_config: Device configuration for creating Tools if needed
+        tools_config_fallback: Fallback ToolsConfig when tools is a Tools instance or None
+        credential_manager: Optional credential manager to attach to Tools
+
+    Returns:
+        Tuple of (tools_instance, tools_config):
+        - If tools is Tools instance: (tools, tools_config_fallback or default)
+        - If tools is ToolsConfig: (created from device_config, tools)
+        - If tools is None: (created from device_config, tools_config_fallback or default)
+
+    Example:
+        >>> # Use custom Tools instance
+        >>> custom_tools = AdbTools(serial="emulator-5554")
+        >>> tools_instance, tools_cfg = resolve_tools_instance(custom_tools, device_config)
+        >>>
+        >>> # Use ToolsConfig (current behavior)
+        >>> tools_cfg = ToolsConfig(allow_drag=True)
+        >>> tools_instance, tools_cfg = resolve_tools_instance(tools_cfg, device_config)
+    """
+    # Import at runtime to avoid circular imports
+    from droidrun.config_manager.config_manager import ToolsConfig
+    from droidrun.tools.tools import Tools
+
+    # Case 1: Tools instance provided directly
+    if isinstance(tools, Tools):
+        tools_instance = tools
+        # Use fallback or default ToolsConfig
+        tools_cfg = tools_config_fallback if tools_config_fallback else ToolsConfig()
+
+    # Case 2: ToolsConfig provided
+    elif tools is not None and isinstance(tools, ToolsConfig):
+        tools_instance = create_tools_from_config(device_config)
+        tools_cfg = tools
+
+    # Case 3: None provided
+    else:
+        tools_instance = create_tools_from_config(device_config)
+        tools_cfg = tools_config_fallback if tools_config_fallback else ToolsConfig()
+
+    # Attach credential manager if provided
+    if credential_manager:
+        tools_instance.credential_manager = credential_manager
+
+    return tools_instance, tools_cfg
 
 
 def click(tool_instance: "Tools", index: int) -> str:
@@ -291,6 +359,126 @@ def build_custom_tool_descriptions(custom_tools: dict) -> str:
         descriptions.append(f"- {action_name}({args}): {desc}")
 
     return "\n".join(descriptions)
+
+
+# =============================================================================
+# CREDENTIAL TOOLS
+# =============================================================================
+
+
+def type_secret(tool_instance: "Tools", secret_id: str, index: int) -> str:
+    """
+    Type a secret credential into an input field without exposing the value.
+
+    Args:
+        tool_instance: Tools instance (must have credential_manager)
+        secret_id: Secret ID from credentials store
+        index: Input field element index
+
+    Returns:
+        Sanitized result message (NEVER includes actual secret value)
+    """
+    import logging
+
+    logger = logging.getLogger("droidrun")
+
+    if (
+        not hasattr(tool_instance, "credential_manager")
+        or tool_instance.credential_manager is None
+    ):
+        return "Error: Credential manager not initialized. Enable credentials in config.yaml"
+
+    try:
+        # Get secret value from credential manager
+        secret_value = tool_instance.credential_manager.get_credential(secret_id)
+
+        # Type using existing input_text method
+        tool_instance.input_text(secret_value, index)
+
+        # Return sanitized message (NEVER log/return actual secret)
+        return f"Successfully typed secret '{secret_id}' into element {index}"
+
+    except Exception as e:
+        # Log error without exposing secret
+        logger.error(f"Failed to type secret '{secret_id}': {e}")
+        available = (
+            tool_instance.credential_manager.list_available_secrets()
+            if tool_instance.credential_manager
+            else []
+        )
+        return f"Error: Secret '{secret_id}' not found. Available: {available}"
+
+
+def build_credential_tools(credential_manager) -> dict:
+    """
+    Build credential-related custom tools if credential manager is available.
+
+    Args:
+        credential_manager: CredentialManager instance or None
+
+    Returns:
+        Dictionary of credential tools (empty if no credentials available)
+    """
+    import logging
+
+    logger = logging.getLogger("droidrun")
+
+    if credential_manager is None:
+        return {}
+
+    # Check if there are any enabled secrets
+    available_secrets = credential_manager.list_available_secrets()
+    if not available_secrets:
+        logger.debug("No enabled secrets found, credential tools disabled")
+        return {}
+
+    logger.info(f"Building credential tools with {len(available_secrets)} secrets")
+
+    return {
+        "type_secret": {
+            "arguments": ["secret_id", "index"],
+            "description": 'Type a secret credential from the credential store into an input field. The agent never sees the actual secret value, only the secret_id. Usage: {"action": "type_secret", "secret_id": "MY_PASSWORD", "index": 5}',
+            "function": type_secret,
+        },
+    }
+
+
+def build_custom_tools(credential_manager=None) -> dict:
+    """
+    Build all custom tools (credentials + utility tools).
+
+    This is the master function that assembles all custom tools:
+    - Credential tools (type_secret) if credential manager available
+    - Utility tools (open_app) always included
+
+    Args:
+        credential_manager: CredentialManager instance or None
+
+    Returns:
+        Dictionary of all custom tools
+    """
+    import logging
+
+    logger = logging.getLogger("droidrun")
+
+    custom_tools = {}
+
+    # 1. Add credential tools (if available)
+    credential_tools = build_credential_tools(credential_manager)
+    custom_tools.update(credential_tools)
+
+    # 2. Add open_app as custom tool (always available)
+    custom_tools["open_app"] = {
+        "arguments": ["text"],
+        "description": 'Open an app by name or description. Usage: {"action": "open_app", "text": "Gmail"}',
+        "function": open_app,
+    }
+
+    # 3. Future: Add other custom tools here
+    # custom_tools["some_other_tool"] = {...}
+
+    logger.info(f"Built {len(custom_tools)} custom tools: {list(custom_tools.keys())}")
+    return custom_tools
 
 
 async def test_open_app(mock_tools, text: str) -> str:

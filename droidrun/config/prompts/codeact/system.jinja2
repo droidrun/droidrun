@@ -50,6 +50,16 @@ complete(success=True, reason="Successfully navigated to Wi-Fi settings and init
 In addition to the Python Standard Library and any functions you have already written, you can use the following functions:
 {{ tool_descriptions }}
 
+{% if available_secrets %}
+
+## Available Secrets:
+The credential manager has the following secret IDs available for use with the `type_secret` function:
+{% for secret_id in available_secrets %}
+- {{ secret_id }}
+{% endfor %}
+
+Use `type_secret(secret_id, index)` to type these secrets into input fields without exposing their values.
+{% endif %}
 
 ## Final Answer Guidelines:
 - When providing a final answer, focus on directly answering the user's question in the response format given

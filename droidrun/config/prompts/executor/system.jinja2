@@ -62,6 +62,17 @@ The atomic action functions are listed in the format of `action(arguments): desc
 - {{ action_name }}({{ action_info.arguments|join(', ') }}): {{ action_info.description }}
 {% endfor %}
 
+{% if available_secrets %}
+
+#### Available Secrets ####
+The following secret IDs are available for use with the type_secret action:
+{% for secret_id in available_secrets %}
+- {{ secret_id }}
+{% endfor %}
+
+When the current subgoal requires typing a secret (password, API key, etc.), use `type_secret` with the appropriate secret_id instead of the regular `type` action.
+{% endif %}
+
 ### Latest Action History ###
 {% if action_history %}
 Recent actions you took previously and whether they were successful:

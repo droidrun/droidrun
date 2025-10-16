@@ -204,3 +204,10 @@ safe_execution:
 tools:
   # Enable drag tool
   allow_drag: false # this does nothing now place holder for now
+
+# === Credential Settings ===
+credentials:
+  # Enable credential manager for secure secret storage
+  enabled: false
+  # Path to credentials file (see credentials_example.yaml for format)
+  file_path: config/credentials_example.yaml

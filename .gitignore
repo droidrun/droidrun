@@ -27,6 +27,10 @@ todo.txt
 
 config.yaml
 
+credentials.yaml
+**/credentials.yaml
+!**/credentials_example.yaml
+
 .*/
 !.gitignore
 !.github/

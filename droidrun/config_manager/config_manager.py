@@ -146,6 +146,15 @@ device:
   # Use TCP communication instead of content provider
   use_tcp: false
 
+  # Cloud device settings (Limbar cloud phones)
+  use_cloud: false
+  cloud_base_url: https://device-api.droidrun.ai
+  cloud_service_key: null  # Set this or use DROIDRUN_API_KEY environment variable
+  cloud_apps: []  # Apps to pre-install (package names or APK URLs)
+  cloud_files: []  # Files to pre-push (URLs pushed to /sdcard/)
+  cloud_country: US  # ISO country code for device location
+  cloud_provision_timeout: 600  # Max seconds to wait for provisioning
+
 # === Telemetry Settings ===
 telemetry:
   # Enable anonymous telemetry
@@ -238,6 +247,13 @@ safe_execution:
 tools:
   # Enable drag tool
   allow_drag: false
+
+# === Credential Settings ===
+credentials:
+  # Enable credential manager
+  enabled: false
+  # Path to credentials file (resolved via PathResolver)
+  file_path: credentials.yaml
 """
 
 
@@ -371,6 +387,15 @@ class DeviceConfig:
     use_tcp: bool = False
     platform: str = "android"  # "android" or "ios"
 
+    # Cloud device settings (Limbar infrastructure)
+    use_cloud: bool = False
+    cloud_base_url: str = "https://device-api.droidrun.ai"
+    cloud_service_key: Optional[str] = None
+    cloud_apps: List[str] = field(default_factory=list)
+    cloud_files: List[str] = field(default_factory=list)
+    cloud_country: str = "US"
+    cloud_provision_timeout: int = 600
+
 
 @dataclass
 class TelemetryConfig:
@@ -433,6 +458,14 @@ class ToolsConfig:
 
 
 @dataclass
+class CredentialsConfig:
+    """Credentials configuration."""
+
+    enabled: bool = False
+    file_path: str = "credentials.yaml"
+
+
+@dataclass
 class DroidRunConfig:
     """Complete DroidRun configuration schema."""
 
@@ -444,6 +477,7 @@ class DroidRunConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    credentials: CredentialsConfig = field(default_factory=CredentialsConfig)
     safe_execution: SafeExecutionConfig = field(default_factory=SafeExecutionConfig)
 
     def __post_init__(self):
@@ -577,6 +611,7 @@ class DroidRunConfig:
             logging=LoggingConfig(**data.get("logging", {})),
             memory=memory_config,
             tools=ToolsConfig(**data.get("tools", {})),
+            credentials=CredentialsConfig(**data.get("credentials", {})),
             safe_execution=safe_execution_config,
         )
 
@@ -701,6 +736,12 @@ class ConfigManager:
         """Access tools configuration."""
         with self._lock:
             return self._config.tools
+
+    @property
+    def credentials(self) -> CredentialsConfig:
+        """Access credentials configuration."""
+        with self._lock:
+            return self._config.credentials
 
     @property
     def llm_profiles(self) -> Dict[str, LLMProfile]:
