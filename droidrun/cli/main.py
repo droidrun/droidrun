@@ -293,60 +293,8 @@ class DroidRunCLI(click.Group):
         return super().parse_args(ctx, args)
 
 
-@click.option("--device", "-d", help="Device serial number or IP address", default=None)
-@click.option(
-    "--provider",
-    "-p",
-    help="LLM provider (OpenAI, Ollama, Anthropic, GoogleGenAI, DeepSeek)",
-    default="GoogleGenAI",
-)
-@click.option(
-    "--model",
-    "-m",
-    help="LLM model name",
-    default="models/gemini-2.5-flash",
-)
-@click.option("--temperature", type=float, help="Temperature for LLM", default=0.2)
-@click.option("--steps", type=int, help="Maximum number of steps", default=15)
-@click.option(
-    "--base_url",
-    "-u",
-    help="Base URL for API (e.g., OpenRouter or Ollama)",
-    default=None,
-)
-@click.option(
-    "--api_base",
-    help="Base URL for API (e.g., OpenAI, OpenAI-Like)",
-    default=None,
-)
-@click.option(
-    "--vision/--no-vision",
-    default=None,
-    help="Enable vision capabilites by using screenshots",
-)
-@click.option(
-    "--reasoning/--no-reasoning", default=None, help="Enable planning with reasoning"
-)
-@click.option(
-    "--tracing/--no-tracing", default=None, help="Enable Arize Phoenix tracing"
-)
-@click.option(
-    "--debug/--no-debug", default=None, help="Enable verbose debug logging"
-)
-@click.option(
-    "--use-tcp/--no-use-tcp",
-    default=None,
-    help="Use TCP communication for device control",
-)
-@click.option(
-    "--save-trajectory",
-    type=click.Choice(["none", "step", "action"]),
-    help="Trajectory saving level: none (no saving), step (save per step), action (save per action)",
-    default="none",
-)
 @click.group(cls=DroidRunCLI)
-def cli(
-):
+def cli():
     """DroidRun - Control your Android device through LLM agents."""
     pass
 
