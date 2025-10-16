@@ -8,8 +8,9 @@ Architecture:
 """
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Type
 import llama_index.core
+from pydantic import BaseModel
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import Context, StartEvent, StopEvent, Workflow, step
 from llama_index.core.workflow.handler import WorkflowHandler
@@ -34,6 +35,7 @@ from droidrun.agent.droid.events import (
 from droidrun.agent.executor import ExecutorAgent
 from droidrun.agent.manager import ManagerAgent
 from droidrun.agent.scripter import ScripterAgent
+from droidrun.agent.oneflows.structured_output_agent import StructuredOutputAgent
 from droidrun.agent.utils.async_utils import wrap_async_tools
 from droidrun.agent.utils.llm_loader import load_agent_llms, validate_llm_dict
 from droidrun.agent.utils.tools import (
@@ -121,6 +123,7 @@ class DroidAgent(Workflow):
         reference_trajectory_manual: Optional[str] = None,
         credentials: "CredentialsConfig | dict | None" = None,
         variables: dict | None = None,
+        output_model: Type[BaseModel] | None = None,
         timeout: int = 1000,
         *args,
         **kwargs,
@@ -147,6 +150,7 @@ class DroidAgent(Workflow):
             credentials: Either CredentialsConfig (from config.credentials),
                         dict of credentials {"SECRET_ID": "value"}, or None
             variables: Optional dict of custom variables accessible throughout execution
+            output_model: Optional Pydantic model for structured output extraction from final answer
             timeout: Workflow timeout in seconds
         """
 
@@ -155,6 +159,7 @@ class DroidAgent(Workflow):
         self.goal = goal
         self.reference_trajectory_manual = reference_trajectory_manual
         self.shared_state = DroidAgentState(instruction=goal, err_to_manager_thresh=2)
+        self.output_model = output_model
         base_config = config
 
         # Store custom variables in shared state
@@ -226,9 +231,13 @@ class DroidAgent(Workflow):
 
             logger.info("🔄 Loading LLMs from config (llms not provided)...")
 
-            llms = load_agent_llms(config=self.config, **llm_kwargs)
+            llms = load_agent_llms(
+                config=self.config,
+                output_model=output_model,
+                **llm_kwargs,
+            )
         if isinstance(llms, dict):
-            validate_llm_dict(self.config, llms)
+            validate_llm_dict(self.config, llms, output_model=output_model)
         elif isinstance(llms, LLM):
             pass
         else:
@@ -259,6 +268,7 @@ class DroidAgent(Workflow):
             self.text_manipulator_llm = llms.get("text_manipulator")
             self.app_opener_llm = llms.get("app_opener")
             self.scripter_llm = llms.get("scripter", self.codeact_llm)
+            self.structured_output_llm = llms.get("structured_output", self.codeact_llm)
 
             logger.info("📚 Using agent-specific LLMs from dictionary")
         else:
@@ -269,6 +279,7 @@ class DroidAgent(Workflow):
             self.text_manipulator_llm = llms
             self.app_opener_llm = llms
             self.scripter_llm = llms
+            self.structured_output_llm = llms
 
         self.trajectory = Trajectory(goal=self.shared_state.instruction)
         self.task_manager = TaskManager()
@@ -308,6 +319,7 @@ class DroidAgent(Workflow):
                 shared_state=self.shared_state,
                 agent_config=self.config.agent,
                 custom_tools=self.custom_tools,
+                output_model=self.output_model,
                 timeout=timeout,
                 reference_trajectory_manual=self.reference_trajectory_manual,
             )
@@ -404,6 +416,7 @@ class DroidAgent(Workflow):
                 debug=self.config.logging.debug,
                 shared_state=self.shared_state,
                 safe_execution_config=self.config.safe_execution,
+                output_model=self.output_model,
                 timeout=self.timeout,
             )
 
@@ -737,10 +750,12 @@ class DroidAgent(Workflow):
         )
         flush()
 
+        # Base result with answer
         result = {
             "success": ev.success,
             "reason": ev.reason,
             "steps": self.shared_state.step_number,
+            "structured_output": None,
         }
 
         if self.memory_client.enabled and self.trajectory:
@@ -791,6 +806,41 @@ class DroidAgent(Workflow):
                     )
             except Exception as exc:  # pragma: no cover - best effort
                 logger.debug("Skipping trajectory memory upload: %s", exc)
+
+        # Extract structured output if model was provided
+        if self.output_model is not None and ev.reason:
+            logger.info("🔄 Running structured output extraction...")
+
+            try:
+                structured_agent = StructuredOutputAgent(
+                    llm=self.structured_output_llm,
+                    pydantic_model=self.output_model,
+                    answer_text=ev.reason,
+                    timeout=self.timeout,
+                )
+
+                handler = structured_agent.run()
+
+                # Stream nested events
+                async for nested_ev in handler.stream_events():
+                    ctx.write_event_to_stream(nested_ev)
+
+                extraction_result = await handler
+
+                if extraction_result["success"]:
+                    result["structured_output"] = extraction_result["structured_output"]
+                    logger.info("✅ Structured output added to final result")
+                else:
+                    logger.warning(
+                        f"⚠️  Structured extraction failed: {extraction_result['error_message']}"
+                    )
+
+            except Exception as e:
+                logger.error(f"❌ Error during structured extraction: {e}")
+                if self.config.logging.debug:
+                    import traceback
+
+                    logger.error(traceback.format_exc())
 
         if self.trajectory and self.config.logging.save_trajectory != "none":
             self.trajectory.save_trajectory()

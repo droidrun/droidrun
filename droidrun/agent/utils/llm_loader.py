@@ -6,9 +6,10 @@ and loads them from config profiles.
 """
 
 import logging
-from typing import Any, List
+from typing import Any, List, Type
 
 from llama_index.core.llms.llm import LLM
+from pydantic import BaseModel
 
 from droidrun.agent.utils.llm_picker import load_llm, load_llms_from_profiles
 from droidrun.config_manager.config_manager import DroidRunConfig
@@ -16,12 +17,15 @@ from droidrun.config_manager.config_manager import DroidRunConfig
 logger = logging.getLogger("droidrun")
 
 
-def _get_required_profiles(config: DroidRunConfig) -> List[str]:
+def _get_required_profiles(
+    config: DroidRunConfig, output_model: Type[BaseModel] | None = None
+) -> List[str]:
     """
     Determine which LLM profiles are required based on agent configuration.
 
     Args:
         config: DroidRun configuration containing agent settings
+        output_model: Optional Pydantic model for structured output extraction
 
     Returns:
         List of required profile names
@@ -34,16 +38,25 @@ def _get_required_profiles(config: DroidRunConfig) -> List[str]:
         # Direct execution mode only needs CodeAct and helper agents
         profiles = ["codeact", "app_opener"]
 
+    # Add structured_output if output_model is provided
+    if output_model is not None:
+        profiles.append("structured_output")
+
     return profiles
 
 
-def validate_llm_dict(config: DroidRunConfig, llms: dict[str, LLM]) -> List[str]:
+def validate_llm_dict(
+    config: DroidRunConfig,
+    llms: dict[str, LLM],
+    output_model: Type[BaseModel] | None = None,
+) -> List[str]:
     """
     Validate that required LLM profiles exist in the provided LLM dictionary.
 
     Args:
         config: DroidRun configuration containing LLM profiles
         llms: Dictionary containing LLM profiles
+        output_model: Optional Pydantic model for structured output extraction
 
     Returns:
         List of required profile names
@@ -51,7 +64,7 @@ def validate_llm_dict(config: DroidRunConfig, llms: dict[str, LLM]) -> List[str]
     Raises:
         ValueError: If any required profiles are missing from llms
     """
-    required_profiles = _get_required_profiles(config)
+    required_profiles = _get_required_profiles(config, output_model)
     missing_profiles = [name for name in required_profiles if name not in llms]
 
     if missing_profiles:
@@ -65,12 +78,15 @@ def validate_llm_dict(config: DroidRunConfig, llms: dict[str, LLM]) -> List[str]
     return required_profiles
 
 
-def validate_llm_profiles(config: DroidRunConfig) -> List[str]:
+def validate_llm_profiles(
+    config: DroidRunConfig, output_model: Type[BaseModel] | None = None
+) -> List[str]:
     """
     Validate that required LLM profiles exist in the configuration.
 
     Args:
         config: DroidRun configuration containing LLM profiles
+        output_model: Optional Pydantic model for structured output extraction
 
     Returns:
         List of required profile names
@@ -78,7 +94,7 @@ def validate_llm_profiles(config: DroidRunConfig) -> List[str]:
     Raises:
         ValueError: If any required profiles are missing from config
     """
-    required_profiles = _get_required_profiles(config)
+    required_profiles = _get_required_profiles(config, output_model)
     missing_profiles = [
         name for name in required_profiles if name not in config.llm_profiles
     ]
@@ -99,6 +115,7 @@ def load_agent_llms(
     custom_provider: str | None = None,
     custom_model: str | None = None,
     temperature: float | None = None,
+    output_model: Type[BaseModel] | None = None,
     **kwargs: Any,
 ) -> dict[str, LLM]:
     """
@@ -109,12 +126,14 @@ def load_agent_llms(
         custom_provider: Optional custom provider to use for all agents
         custom_model: Optional custom model to use for all agents
         temperature: Optional temperature override for all agents
+        output_model: Optional Pydantic model for structured output extraction
         **kwargs: Additional kwargs to pass to LLM constructor (base_url, api_base, etc.)
 
     Returns:
         Dictionary mapping agent type to LLM instance:
-        - If reasoning=True: {manager, executor, codeact, text_manipulator, app_opener, scripter}
-        - If reasoning=False: {codeact, text_manipulator, app_opener}
+        - If reasoning=True: {manager, executor, codeact, text_manipulator, app_opener, scripter, structured_output?}
+        - If reasoning=False: {codeact, text_manipulator, app_opener, structured_output?}
+        - structured_output is only included if output_model is provided
 
     Raises:
         ValueError: If required LLM profiles are missing from config
@@ -153,6 +172,11 @@ def load_agent_llms(
             "app_opener": custom_llm,
             "scripter": custom_llm,
         }
+
+        # Add structured_output if output_model is provided
+        if output_model is not None:
+            llms["structured_output"] = custom_llm
+
         logger.info(f"🧠 Custom LLM ready: {custom_provider}/{custom_model}")
         return llms
 
@@ -160,7 +184,7 @@ def load_agent_llms(
     logger.info("📋 Loading LLMs from config profiles...")
 
     # Determine which LLMs are needed and validate they exist
-    profile_names = validate_llm_profiles(config)
+    profile_names = validate_llm_profiles(config, output_model)
 
     # Apply temperature override to all profiles if specified
     overrides = {}

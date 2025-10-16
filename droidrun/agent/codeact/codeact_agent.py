@@ -4,7 +4,9 @@ import logging
 import re
 import time
 import warnings
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Type, Union
+
+from pydantic import BaseModel
 
 # Suppress all warnings for llama-index import (version compatibility)
 with warnings.catch_warnings():
@@ -62,6 +64,7 @@ class CodeActAgent(Workflow):
         debug: bool = False,
         shared_state: Optional["DroidAgentState"] = None,
         safe_execution_config=None,
+        output_model: Type[BaseModel] | None = None,
         *args,
         **kwargs,
     ):
@@ -76,6 +79,7 @@ class CodeActAgent(Workflow):
         self.debug = debug
         self.tools = tools_instance
         self.shared_state = shared_state
+        self.output_model = output_model
 
         self.chat_memory = None
         self.episodic_memory = EpisodicMemory()
@@ -119,6 +123,11 @@ class CodeActAgent(Workflow):
         if hasattr(tools_instance, "credential_manager") and tools_instance.credential_manager:
             available_secrets = tools_instance.credential_manager.list_available_secrets()
 
+        # Prepare output structure schema if provided
+        output_schema = None
+        if self.output_model is not None:
+            output_schema = self.output_model.model_json_schema()
+
         # Load prompts from config
         system_prompt_text = PromptLoader.load_prompt(
             agent_config.get_codeact_system_prompt_path(),
@@ -126,6 +135,7 @@ class CodeActAgent(Workflow):
                 "tool_descriptions": self.tool_descriptions,
                 "available_secrets": available_secrets,
                 "variables": shared_state.custom_variables if shared_state else {},
+                "output_schema": output_schema,
             },
         )
         self.system_prompt = ChatMessage(role="system", content=system_prompt_text)

@@ -128,6 +128,26 @@ You should:
 - Max {{ scripter_max_steps }} steps per scripter task
 </scripter_execution>
 {% endif %}
+{% if output_schema %}
+
+<output_requirements>
+**IMPORTANT:** When you complete this task and use the `<request_accomplished>` tag, your final answer must include the following information:
+
+{{ output_schema.description if output_schema.description else "Information to collect:" }}
+
+**Required data fields:**
+{% for field_name, field_info in output_schema.properties.items() %}
+- **{{ field_name }}**: {{ field_info.description if field_info.description else field_info.type }}{% if field_name in output_schema.get('required', []) %} (REQUIRED){% endif %}
+
+{% endfor %}
+
+**Important:**
+- Make sure to collect ALL required data before marking the task as complete
+- Include this information clearly in your `<request_accomplished>` message
+- Present the data in a natural, readable format - do NOT output JSON or structured data
+- Simply state the information as plain text answers
+</output_requirements>
+{% endif %}
 
 ---
 

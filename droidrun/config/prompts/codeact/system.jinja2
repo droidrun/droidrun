@@ -66,4 +66,23 @@ Use `type_secret(secret_id, index)` to type these secrets into input fields with
 - Present the results clearly and concisely as if you computed them directly
 - Structure your response like you're directly answering the user's query, not explaining how you solved it
 
+{% if output_schema %}
+
+## Output Requirements:
+**IMPORTANT:** When you call `complete(success, reason)` to mark this task as complete, include the following information in your `reason` parameter:
+
+{{ output_schema.description if output_schema.description else "Information to collect:" }}
+
+**Required data fields:**
+{% for field_name, field_info in output_schema.properties.items() %}
+- **{{ field_name }}**: {{ field_info.description if field_info.description else field_info.type }}{% if field_name in output_schema.get('required', []) %} (REQUIRED){% endif %}
+
+{% endfor %}
+
+**Important:**
+- Collect ALL required data before calling complete()
+- Include this information in the `reason` parameter in a natural, readable format
+- Do NOT output JSON - present data as plain text
+{% endif %}
+
 Reminder: Always place your Python code between ```...``` tags when you want to run code.
