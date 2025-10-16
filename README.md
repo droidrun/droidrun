@@ -68,6 +68,33 @@ Read on how to get droidrun up and running within seconds in [our docs](https://
 - Remote assistance for less technical users
 - Exploring mobile UI with natural language commands
 
+## ⚙️ Trajectory Memory Configuration
+
+Droidrun can reuse past successful (and failed) runs when planning. Configure
+the behaviour in 'config.yaml' under the 'memory; section. A starter
+configuration looks like this:
+
+```yaml
+memory:
+  provider: local_http  # options: local_http, remote_http, disabled
+  local_http:
+    enabled: true
+    base_url: http://localhost:8000
+    similarity_threshold: 0.5
+    timeout: 5
+  remote_http:
+    enabled: false
+    base_url: null
+    auth_token: null
+    similarity_threshold: 0.6
+    timeout: 10
+```
+
+- Leave 'provider' as 'disabled' to turn the feature off.
+- Use 'local_http' with the bundled 'cbr/server.py' to run a lightweight local retriever.
+- Switch to 'remote_http' when you have a backend that exposes the same REST API.
+
+
 ## 👥 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
