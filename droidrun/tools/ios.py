@@ -8,6 +8,7 @@ from typing import Optional, Dict, Tuple, List, Any
 import logging
 import requests
 from droidrun.tools.tools import Tools
+from droidrun.tools.credential_manager import get_credential_manager
 
 logger = logging.getLogger("IOS")
 
@@ -57,6 +58,9 @@ class IOSTools(Tools):
         )
         self.bundle_identifiers = bundle_identifiers
         logger.info(f"iOS device URL: {url}")
+        
+        # Initialize credential manager
+        self.credential_manager = get_credential_manager()
 
     def get_state(self) -> List[Dict[str, Any]]:
         """
@@ -597,3 +601,101 @@ class IOSTools(Tools):
                 raise ValueError("Reason for failure is required if success is False.")
             self.reason = reason
             self.finished = True
+
+    def fill_credentials(self, username: str = None, password: str = None, **kwargs) -> str:
+        """
+        Fill credentials using the credential manager.
+        Supports placeholder resolution like {{USER_NAME}} and {{PASSWORD}}.
+        
+        Args:
+            username: Username or placeholder (e.g., "{{USER_NAME}}")
+            password: Password or placeholder (e.g., "{{PASSWORD}}")
+            **kwargs: Additional credential key-value pairs
+            
+        Returns:
+            Result message with resolved credentials (values masked for security)
+        """
+        try:
+            resolved_credentials = {}
+            missing_credentials = []
+            
+            # Process username
+            if username:
+                resolved_username = self.credential_manager.resolve_placeholders(username)
+                if resolved_username == username and username.startswith("{{") and username.endswith("}}"):
+                    missing_credentials.append(username)
+                else:
+                    resolved_credentials["username"] = resolved_username
+            
+            # Process password
+            if password:
+                resolved_password = self.credential_manager.resolve_placeholders(password)
+                if resolved_password == password and password.startswith("{{") and password.endswith("}}"):
+                    missing_credentials.append(password)
+                else:
+                    resolved_credentials["password"] = resolved_password
+            
+            # Process additional credentials
+            for key, value in kwargs.items():
+                resolved_value = self.credential_manager.resolve_placeholders(value)
+                if resolved_value == value and value.startswith("{{") and value.endswith("}}"):
+                    missing_credentials.append(value)
+                else:
+                    resolved_credentials[key] = resolved_value
+            
+            # Check for missing credentials
+            if missing_credentials:
+                return f"Error: Missing credentials for placeholders: {', '.join(missing_credentials)}. Available credentials: {', '.join(self.credential_manager.list_credentials())}"
+            
+            # Create response with masked values for security
+            response_parts = []
+            for key, value in resolved_credentials.items():
+                if key.lower() in ['password', 'pass', 'pwd', 'secret', 'token', 'key']:
+                    masked_value = "*" * len(value) if value else "None"
+                    response_parts.append(f"{key}: {masked_value}")
+                else:
+                    response_parts.append(f"{key}: {value}")
+            
+            logger.debug(f"Resolved {len(resolved_credentials)} credentials")
+            return f"Credentials resolved successfully: {' | '.join(response_parts)}"
+            
+        except Exception as e:
+            logger.error(f"Error filling credentials: {e}")
+            return f"Error filling credentials: {str(e)}"
+
+    def get_credential_info(self) -> str:
+        """
+        Get information about available credentials.
+        
+        Returns:
+            Information about available credentials (without exposing values)
+        """
+        try:
+            info = self.credential_manager.get_credential_info()
+            
+            response_parts = []
+            response_parts.append(f"Total credentials: {info['total_credentials']}")
+            response_parts.append(f"Environment file: {info['env_file_path']}")
+            response_parts.append(f"Environment file exists: {info['env_file_exists']}")
+            
+            if info['credential_keys']:
+                # Group credentials by type for better organization
+                cred_types = {
+                    'user': [k for k in info['credential_keys'] if 'user' in k.lower()],
+                    'pass': [k for k in info['credential_keys'] if any(x in k.lower() for x in ['pass', 'pwd'])],
+                    'api': [k for k in info['credential_keys'] if 'api' in k.lower()],
+                    'token': [k for k in info['credential_keys'] if 'token' in k.lower()],
+                    'other': [k for k in info['credential_keys'] if not any(x in k.lower() for x in ['user', 'pass', 'pwd', 'api', 'token'])]
+                }
+                
+                for cred_type, keys in cred_types.items():
+                    if keys:
+                        response_parts.append(f"{cred_type.title()} credentials: {', '.join(keys)}")
+            else:
+                response_parts.append("No credentials available")
+            
+            return " | ".join(response_parts)
+            
+        except Exception as e:
+            logger.error(f"Error getting credential info: {e}")
+            return f"Error getting credential info: {str(e)}"

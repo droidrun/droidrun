@@ -139,6 +139,31 @@ class Tools(ABC):
         """
         pass
 
+    @abstractmethod
+    def fill_credentials(self, username: str = None, password: str = None, **kwargs) -> str:
+        """
+        Fill credentials using the credential manager.
+        Supports placeholder resolution like {{USER_NAME}} and {{PASSWORD}}.
+        
+        Args:
+            username: Username or placeholder (e.g., "{{USER_NAME}}")
+            password: Password or placeholder (e.g., "{{PASSWORD}}")
+            **kwargs: Additional credential key-value pairs
+            
+        Returns:
+            Result message with resolved credentials (values masked for security)
+        """
+        pass
+
+    @abstractmethod
+    def get_credential_info(self) -> str:
+        """
+        Get information about available credentials.
+        
+        Returns:
+            Information about available credentials (without exposing values)
+        """
+        pass
 
 def describe_tools(tools: Tools, exclude_tools: Optional[List[str]] = None) -> Dict[str, Callable[..., Any]]:
     """
@@ -166,6 +191,10 @@ def describe_tools(tools: Tools, exclude_tools: Optional[List[str]] = None) -> D
         # state management
         "remember": tools.remember,
         "complete": tools.complete,
+        # credential management
+        "fill_credentials": tools.fill_credentials,
+        "get_credential_info": tools.get_credential_info,
+
     }
 
     # Remove excluded tools

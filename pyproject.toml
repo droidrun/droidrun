@@ -11,6 +11,7 @@ dependencies = [
     "llama-index-llms-google-genai>=0.6.2",
     "posthog>=6.7.6",
     "pydantic>=2.11.10",
+    "python-dotenv>=1.0.0",
     "rich>=14.1.0",
 ]
 requires-python = ">=3.11"
