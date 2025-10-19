@@ -1,3 +1,4 @@
+from pydantic import BaseModel
 import logging
 import re
 import time
@@ -35,6 +36,12 @@ from droidrun.agent.context.agent_persona import AgentPersona
 
 logger = logging.getLogger("droidrun")
 
+class AgentResponse(BaseModel):
+    success:bool
+    output:str|None
+    codeact_steps:int
+    code_executions:int
+    reason:str|None
 
 class CodeActAgent(Workflow):
     """
@@ -42,6 +49,12 @@ class CodeActAgent(Workflow):
     to solve problems requiring code execution. It extracts code from
     Markdown blocks and uses specific step types for tracking.
     """
+
+    def set_output_schema(self, schema_cls: type[BaseModel]):
+        """
+        Set a Pydantic model to structure the output of the agent.
+        """
+        self._output_schema = schema_cls
 
     def __init__(
         self,
@@ -339,11 +352,16 @@ class CodeActAgent(Workflow):
             }
         )
 
+        if hasattr(self, '_output_schema'):
+            structured_result=self._output_schema(**result_data)
+        else:
+            structured_result=result_data
+
         ctx.write_event_to_stream(
             EpisodicMemoryEvent(episodic_memory=self.episodic_memory)
         )
 
-        return StopEvent(result)
+        return StopEvent(structured_result)
 
     async def _get_llm_response(
         self, ctx: Context, chat_history: List[ChatMessage]
