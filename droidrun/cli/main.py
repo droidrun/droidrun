@@ -14,6 +14,7 @@ from adbutils import adb
 from rich.console import Console
 
 from droidrun.agent.droid import DroidAgent
+from droidrun.agent.memory import create_memory_client
 from droidrun.cli.logs import LogHandler
 from droidrun.config_manager import ConfigManager
 from droidrun.macro.cli import macro_cli
@@ -198,8 +199,27 @@ async def run_command(
             if config.tracing.enabled:
                 logger.info("🔍 Tracing enabled")
 
+            memory_client = create_memory_client(config=config)
+            reference_manual_str = None
+            if config.agent.reasoning and memory_client.enabled:
+                print("Checking long-term memory for similar tasks...")
+                manual_str = memory_client.fetch_reference_manual(command)
+                if manual_str:
+                    reference_manual_str = manual_str
+                    print(
+                        "Found a relevant trajectory. Providing it to the agent as a reference."
+                    )
+                else:
+                    print(
+                        "No highly similar trajectories found. Proceeding with standard planning."
+                    )
+            elif config.agent.reasoning:
+                logger.debug(
+                    "Memory service disabled; proceeding without reference trajectory."
+                )
+
             # Build DroidAgent kwargs for LLM loading
-            droid_agent_kwargs = {"runtype": "cli"}
+            droid_agent_kwargs = {"runtype": "cli", "memory_client": memory_client}
 
             # Add custom LLM parameters if provided
             if provider is not None:
@@ -217,6 +237,7 @@ async def run_command(
                 goal=command,
                 config=config,
                 timeout=1000,
+                reference_trajectory_manual=reference_manual_str,
                 **droid_agent_kwargs,
             )
 
@@ -272,60 +293,8 @@ class DroidRunCLI(click.Group):
         return super().parse_args(ctx, args)
 
 
-@click.option("--device", "-d", help="Device serial number or IP address", default=None)
-@click.option(
-    "--provider",
-    "-p",
-    help="LLM provider (OpenAI, Ollama, Anthropic, GoogleGenAI, DeepSeek)",
-    default="GoogleGenAI",
-)
-@click.option(
-    "--model",
-    "-m",
-    help="LLM model name",
-    default="models/gemini-2.5-flash",
-)
-@click.option("--temperature", type=float, help="Temperature for LLM", default=0.2)
-@click.option("--steps", type=int, help="Maximum number of steps", default=15)
-@click.option(
-    "--base_url",
-    "-u",
-    help="Base URL for API (e.g., OpenRouter or Ollama)",
-    default=None,
-)
-@click.option(
-    "--api_base",
-    help="Base URL for API (e.g., OpenAI, OpenAI-Like)",
-    default=None,
-)
-@click.option(
-    "--vision/--no-vision",
-    default=None,
-    help="Enable vision capabilites by using screenshots",
-)
-@click.option(
-    "--reasoning/--no-reasoning", default=None, help="Enable planning with reasoning"
-)
-@click.option(
-    "--tracing/--no-tracing", default=None, help="Enable Arize Phoenix tracing"
-)
-@click.option(
-    "--debug/--no-debug", default=None, help="Enable verbose debug logging"
-)
-@click.option(
-    "--use-tcp/--no-use-tcp",
-    default=None,
-    help="Use TCP communication for device control",
-)
-@click.option(
-    "--save-trajectory",
-    type=click.Choice(["none", "step", "action"]),
-    help="Trajectory saving level: none (no saving), step (save per step), action (save per action)",
-    default="none",
-)
 @click.group(cls=DroidRunCLI)
-def cli(
-):
+def cli():
     """DroidRun - Control your Android device through LLM agents."""
     pass
 
@@ -714,8 +683,27 @@ async def test(
             if config.tracing.enabled:
                 logger.info("🔍 Tracing enabled")
 
+            memory_client = create_memory_client(config=config)
+            reference_manual_str = None
+            if config.agent.reasoning and memory_client.enabled:
+                logger.info("Checking long-term memory for similar tasks...")
+                manual_str = memory_client.fetch_reference_manual(command)
+                if manual_str:
+                    reference_manual_str = manual_str
+                    logger.info(
+                        "Found a relevant trajectory. Providing it to the agent as a reference."
+                    )
+                else:
+                    logger.info(
+                        "No highly similar trajectories found. Proceeding with standard planning."
+                    )
+            elif config.agent.reasoning:
+                logger.debug(
+                    "Memory service disabled; proceeding without reference trajectory."
+                )
+
             # Build DroidAgent kwargs for LLM loading
-            droid_agent_kwargs = {}
+            droid_agent_kwargs = {"memory_client": memory_client}
             if temperature is not None:
                 droid_agent_kwargs["temperature"] = temperature
 
@@ -723,6 +711,7 @@ async def test(
                 goal=command,
                 config=config,
                 timeout=1000,
+                reference_trajectory_manual=reference_manual_str,
                 **droid_agent_kwargs,
             )
 

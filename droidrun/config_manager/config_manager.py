@@ -172,6 +172,21 @@ logging:
   save_trajectory: none
   rich_text: false
 
+# === Memory Settings ===
+memory:
+  # Enable or disable persistent trajectory memory reuse
+  enabled: false
+  # Mode: local (bundled HTTP server) or remote (self-hosted HTTP API)
+  mode: local
+  # Base URL for the memory service
+  base_url: http://localhost:8000
+  # Minimum similarity score required to reuse a trajectory
+  similarity_threshold: 0.5
+  # HTTP timeout for memory operations (seconds)
+  timeout: 5
+  # Optional bearer token for remote mode
+  auth_token: null
+
 # === Safe Execution Settings ===
 # Applied when agent.codeact.safe_execution or agent.scripter.safe_execution is true
 safe_execution:
@@ -395,6 +410,44 @@ class LoggingConfig:
 
 
 @dataclass
+class MemoryConfig:
+    """Trajectory memory configuration."""
+
+    enabled: bool = False
+    mode: str = "local"  # "local" or "remote"
+    base_url: Optional[str] = None
+    similarity_threshold: Optional[float] = None
+    timeout: Optional[float] = None
+    auth_token: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        """Apply defaults derived from the selected mode."""
+
+        normalized_mode = (self.mode or "local").lower()
+        if normalized_mode not in {"local", "remote"}:
+            normalized_mode = "local"
+        self.mode = normalized_mode
+
+        if self.base_url is None and self.mode == "local":
+            self.base_url = "http://localhost:8000"
+
+        default_threshold = 0.6 if self.mode == "remote" else 0.5
+        default_timeout = 10.0 if self.mode == "remote" else 5.0
+
+        if self.similarity_threshold is None:
+            self.similarity_threshold = default_threshold
+        else:
+            self.similarity_threshold = float(self.similarity_threshold)
+
+        if self.timeout is None:
+            self.timeout = default_timeout
+        else:
+            self.timeout = float(self.timeout)
+
+        self.enabled = bool(self.enabled)
+
+
+@dataclass
 class ToolsConfig:
     """Tools configuration."""
 
@@ -419,6 +472,7 @@ class DroidRunConfig:
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
     tracing: TracingConfig = field(default_factory=TracingConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     credentials: CredentialsConfig = field(default_factory=CredentialsConfig)
     safe_execution: SafeExecutionConfig = field(default_factory=SafeExecutionConfig)
@@ -535,6 +589,13 @@ class DroidRunConfig:
             app_cards=app_cards_config,
         )
 
+        # Parse memory config
+        memory_data = data.get("memory", {})
+        if isinstance(memory_data, dict):
+            memory_config = MemoryConfig(**memory_data)
+        else:
+            memory_config = MemoryConfig()
+
         # Parse safe_execution config
         safe_exec_data = data.get("safe_execution", {})
         safe_execution_config = (
@@ -550,6 +611,7 @@ class DroidRunConfig:
             telemetry=TelemetryConfig(**data.get("telemetry", {})),
             tracing=TracingConfig(**data.get("tracing", {})),
             logging=LoggingConfig(**data.get("logging", {})),
+            memory=memory_config,
             tools=ToolsConfig(**data.get("tools", {})),
             credentials=CredentialsConfig(**data.get("credentials", {})),
             safe_execution=safe_execution_config,
@@ -664,6 +726,12 @@ class ConfigManager:
         """Access logging configuration."""
         with self._lock:
             return self._config.logging
+
+    @property
+    def memory(self) -> MemoryConfig:
+        """Access trajectory memory configuration."""
+        with self._lock:
+            return self._config.memory
 
     @property
     def tools(self) -> ToolsConfig:

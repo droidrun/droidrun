@@ -8,6 +8,7 @@ from droidrun.config_manager.config_manager import (
     ExecutorConfig,
     LLMProfile,
     LoggingConfig,
+    MemoryConfig,
     ManagerConfig,
     ScripterConfig,
     TelemetryConfig,
@@ -28,6 +29,7 @@ __all__ = [
     "ConfigManager",
     "DroidRunConfig",
     "LLMProfile",
+    "MemoryConfig",
     # Agent configs
     "AgentConfig",
     "CodeActConfig",
