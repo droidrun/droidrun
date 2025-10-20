@@ -1,3 +1,10 @@
+"""Local HTTP façade mirroring the remote trajectory memory API.
+
+Running the memory store as a separate FastAPI app keeps heavy vector-store
+dependencies isolated while letting the agent reuse the exact same HTTP client
+code path for both local and remote deployments.
+"""
+
 import json
 import os
 import uuid

@@ -76,23 +76,17 @@ configuration looks like this:
 
 ```yaml
 memory:
-  provider: local_http  # options: local_http, remote_http, disabled
-  local_http:
-    enabled: true
-    base_url: http://localhost:8000
-    similarity_threshold: 0.5
-    timeout: 5
-  remote_http:
-    enabled: false
-    base_url: null
-    auth_token: null
-    similarity_threshold: 0.6
-    timeout: 10
+  enabled: true
+  mode: local  # options: local, remote
+  base_url: http://localhost:8000
+  similarity_threshold: 0.5
+  timeout: 5
+  auth_token: null
 ```
 
-- Leave 'provider' as 'disabled' to turn the feature off.
-- Use 'local_http' with the bundled 'cbr/server.py' to run a lightweight local retriever.
-- Switch to 'remote_http' when you have a backend that exposes the same REST API.
+- Set `enabled: false` to turn the feature off quickly.
+- Keep `mode: local` when using the bundled `cbr/server.py` retriever.
+- Switch to `mode: remote` when you have an HTTP backend that exposes the same API (remember to set `base_url` and optionally `auth_token`).
 
 
 ## 👥 Contributing

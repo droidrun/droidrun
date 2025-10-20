@@ -174,19 +174,18 @@ logging:
 
 # === Memory Settings ===
 memory:
-  # Provider: disabled, local_http, remote_http
-  provider: disabled
-  local_http:
-    enabled: false
-    base_url: http://localhost:8000
-    similarity_threshold: 0.5
-    timeout: 5
-  remote_http:
-    enabled: false
-    base_url: null
-    auth_token: null
-    similarity_threshold: 0.6
-    timeout: 10
+  # Enable or disable persistent trajectory memory reuse
+  enabled: false
+  # Mode: local (bundled HTTP server) or remote (self-hosted HTTP API)
+  mode: local
+  # Base URL for the memory service
+  base_url: http://localhost:8000
+  # Minimum similarity score required to reuse a trajectory
+  similarity_threshold: 0.5
+  # HTTP timeout for memory operations (seconds)
+  timeout: 5
+  # Optional bearer token for remote mode
+  auth_token: null
 
 # === Safe Execution Settings ===
 # Applied when agent.codeact.safe_execution or agent.scripter.safe_execution is true
@@ -411,33 +410,41 @@ class LoggingConfig:
 
 
 @dataclass
-class LocalMemoryConfig:
-    """Configuration for the local HTTP trajectory memory service."""
-
-    enabled: bool = False
-    base_url: str = "http://localhost:8000"
-    similarity_threshold: float = 0.5
-    timeout: float = 5.0
-
-
-@dataclass
-class RemoteMemoryConfig:
-    """Configuration for remote HTTP trajectory memory service."""
-
-    enabled: bool = False
-    base_url: Optional[str] = None
-    auth_token: Optional[str] = None
-    similarity_threshold: float = 0.6
-    timeout: float = 10.0
-
-
-@dataclass
 class MemoryConfig:
-    """Top-level trajectory memory configuration."""
+    """Trajectory memory configuration."""
 
-    provider: str = "disabled"
-    local_http: LocalMemoryConfig = field(default_factory=LocalMemoryConfig)
-    remote_http: RemoteMemoryConfig = field(default_factory=RemoteMemoryConfig)
+    enabled: bool = False
+    mode: str = "local"  # "local" or "remote"
+    base_url: Optional[str] = None
+    similarity_threshold: Optional[float] = None
+    timeout: Optional[float] = None
+    auth_token: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        """Apply defaults derived from the selected mode."""
+
+        normalized_mode = (self.mode or "local").lower()
+        if normalized_mode not in {"local", "remote"}:
+            normalized_mode = "local"
+        self.mode = normalized_mode
+
+        if self.base_url is None and self.mode == "local":
+            self.base_url = "http://localhost:8000"
+
+        default_threshold = 0.6 if self.mode == "remote" else 0.5
+        default_timeout = 10.0 if self.mode == "remote" else 5.0
+
+        if self.similarity_threshold is None:
+            self.similarity_threshold = default_threshold
+        else:
+            self.similarity_threshold = float(self.similarity_threshold)
+
+        if self.timeout is None:
+            self.timeout = default_timeout
+        else:
+            self.timeout = float(self.timeout)
+
+        self.enabled = bool(self.enabled)
 
 
 @dataclass
@@ -584,11 +591,10 @@ class DroidRunConfig:
 
         # Parse memory config
         memory_data = data.get("memory", {})
-        memory_config = MemoryConfig(
-            provider=memory_data.get("provider", "disabled"),
-            local_http=LocalMemoryConfig(**memory_data.get("local_http", {})),
-            remote_http=RemoteMemoryConfig(**memory_data.get("remote_http", {})),
-        )
+        if isinstance(memory_data, dict):
+            memory_config = MemoryConfig(**memory_data)
+        else:
+            memory_config = MemoryConfig()
 
         # Parse safe_execution config
         safe_exec_data = data.get("safe_execution", {})

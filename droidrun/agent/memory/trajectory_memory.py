@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import requests
 
@@ -15,7 +15,7 @@ from droidrun.agent.executor.events import (
 )
 from droidrun.agent.manager.events import ManagerInternalPlanEvent
 from droidrun.agent.utils.trajectory import Trajectory
-from droidrun.config_manager import ConfigManager, DroidRunConfig
+from droidrun.config_manager import ConfigManager, DroidRunConfig, MemoryConfig
 
 from .base import (
     DisabledTrajectoryMemoryClient,
@@ -200,80 +200,38 @@ class TrajectoryMemoryClient(LocalHttpTrajectoryMemoryClient):
     """Backward-compatible default client (local HTTP)."""
 
 
-def _extract_section(config: Mapping[str, Any], key: str) -> Dict[str, Any]:
-    value = config.get(key, {})
-    if isinstance(value, dict):
-        return value
-    logger.warning(
-        "Config section 'memory.%s' must be a mapping; ignoring value of type %s.",
-        key,
-        type(value),
-    )
-    return {}
+def _normalize_memory_config(source: Any) -> MemoryConfig:
+    """Convert various config shapes into a MemoryConfig instance."""
+
+    if isinstance(source, MemoryConfig):
+        return source
+
+    if isinstance(source, dict):
+        return MemoryConfig(**source)
+
+    attrs: Dict[str, Any] = {}
+    for key in ("enabled", "mode", "base_url", "similarity_threshold", "timeout", "auth_token"):
+        if hasattr(source, key):
+            attrs[key] = getattr(source, key)
+
+    if not attrs:
+        return MemoryConfig()
+
+    return MemoryConfig(**attrs)
 
 
-def _extract_options(source: Mapping[str, Any], mapping: Dict[str, Tuple[str, ...]]) -> Dict[str, Any]:
-    options: Dict[str, Any] = {}
-    for canonical, aliases in mapping.items():
-        for alias in aliases:
-            if alias in source and source[alias] is not None:
-                options[canonical] = source[alias]
-                break
-    return options
+def _resolve_mode(choice: Optional[str], fallback: str) -> str:
+    if not choice:
+        return fallback
 
-
-def _split_kwargs(
-    kwargs: Dict[str, Any], mapping: Dict[str, Tuple[str, ...]]
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    alias_lookup = {
-        alias: canonical
-        for canonical, aliases in mapping.items()
-        for alias in aliases
-    }
-    overrides: Dict[str, Any] = {}
-    remaining: Dict[str, Any] = {}
-    for key, value in kwargs.items():
-        canonical = alias_lookup.get(key)
-        if canonical:
-            overrides[canonical] = value
-        else:
-            remaining[key] = value
-    return overrides, remaining
-
-
-_LOCAL_KEYS: Dict[str, Tuple[str, ...]] = {
-    "base_url": ("base_url", "url"),
-    "enabled": ("enabled",),
-    "similarity_threshold": ("similarity_threshold", "threshold"),
-    "timeout": ("timeout",),
-}
-
-_REMOTE_KEYS: Dict[str, Tuple[str, ...]] = {
-    **_LOCAL_KEYS,
-    "auth_token": ("auth_token", "token"),
-}
-
-
-def _config_to_mapping(config: DroidRunConfig) -> Dict[str, Any]:
-    memory = getattr(config, "memory", None)
-    if not memory:
-        return {}
-
-    data: Dict[str, Any] = {
-        "provider": getattr(memory, "provider", None),
-        "local_http": getattr(memory, "local_http", {}),
-        "remote_http": getattr(memory, "remote_http", {}),
-    }
-
-    for key in ("local_http", "remote_http"):
-        section = data.get(key)
-        if hasattr(section, "__dict__"):
-            data[key] = {
-                field: getattr(section, field)
-                for field in vars(section)
-                if not field.startswith("_")
-            }
-    return data
+    normalized = str(choice).lower()
+    if normalized in {"disabled", "none", "off"}:
+        return "disabled"
+    if normalized in {"remote", "remote_http", "remote-http", "backend"}:
+        return "remote"
+    if normalized in {"local", "local_http", "local-http"}:
+        return "local"
+    return fallback
 
 
 def create_memory_client(
@@ -293,46 +251,62 @@ def create_memory_client(
     if resolved_config is None:
         return DisabledTrajectoryMemoryClient()
 
-    memory_mapping = _config_to_mapping(resolved_config)
-    configured_provider = memory_mapping.get("provider")
-    if isinstance(configured_provider, str):
-        provider_choice = configured_provider
-    else:
-        provider_choice = None
+    memory_source = getattr(resolved_config, "memory", None)
+    memory_config = _normalize_memory_config(memory_source)
 
-    resolved_provider = (provider or provider_choice or "disabled").lower()
+    provider_choice = memory_config.mode
+    mode_kwarg = kwargs.pop("mode", None)
+    provider_kwarg = kwargs.pop("provider", None)
 
-    if resolved_provider in {"local", "local_http", "local-http"}:
-        section = _extract_section(memory_mapping, "local_http")
-        config_options = _extract_options(section, _LOCAL_KEYS)
-        override_options, remaining_kwargs = _split_kwargs(dict(kwargs), _LOCAL_KEYS)
-        options = {**config_options, **override_options}
-        if not options.get("enabled", True):
-            return DisabledTrajectoryMemoryClient()
-        return LocalHttpTrajectoryMemoryClient(**options, **remaining_kwargs)
+    resolved_mode = _resolve_mode(provider, provider_choice or "local")
+    resolved_mode = _resolve_mode(provider_kwarg, resolved_mode)
+    resolved_mode = _resolve_mode(mode_kwarg, resolved_mode)
 
-    if resolved_provider in {"remote", "remote_http", "remote-http", "backend"}:
-        section = _extract_section(memory_mapping, "remote_http")
-        config_options = _extract_options(section, _REMOTE_KEYS)
-        override_options, remaining_kwargs = _split_kwargs(dict(kwargs), _REMOTE_KEYS)
-        options = {**config_options, **override_options}
-        if not options.get("enabled", True):
-            return DisabledTrajectoryMemoryClient()
-        if not options.get("base_url"):
-            logger.debug(
-                "Remote memory provider selected but no base_url configured; disabling client.",
-            )
-            return DisabledTrajectoryMemoryClient()
-        return RemoteHttpTrajectoryMemoryClient(**options, **remaining_kwargs)
+    enabled_override = kwargs.pop("enabled", None)
+    is_enabled = memory_config.enabled
+    if enabled_override is not None:
+        is_enabled = bool(enabled_override)
 
-    if resolved_provider in {"disabled", "none", "off"}:
+    if resolved_mode == "disabled" or not is_enabled:
         return DisabledTrajectoryMemoryClient()
 
-    logger.debug(
-        "Unknown trajectory memory provider '%s'. Falling back to disabled client.",
-        resolved_provider,
+    base_url = kwargs.pop("base_url", memory_config.base_url)
+    similarity_threshold = kwargs.pop(
+        "similarity_threshold", memory_config.similarity_threshold
     )
-    return DisabledTrajectoryMemoryClient()
+    timeout = kwargs.pop("timeout", memory_config.timeout)
+    auth_token = kwargs.pop("auth_token", memory_config.auth_token)
+
+    if similarity_threshold is not None:
+        similarity_threshold = float(similarity_threshold)
+    if timeout is not None:
+        timeout = float(timeout)
+
+    if resolved_mode == "remote":
+        if not base_url:
+            logger.debug(
+                "Remote memory mode selected but no base_url configured; disabling client.",
+            )
+            return DisabledTrajectoryMemoryClient()
+
+        return RemoteHttpTrajectoryMemoryClient(
+            base_url=base_url,
+            similarity_threshold=similarity_threshold,
+            timeout=timeout,
+            auth_token=auth_token,
+            enabled=True,
+            **kwargs,
+        )
+
+    # Default to local HTTP client
+    base_url = base_url or DEFAULT_BASE_URL
+    return LocalHttpTrajectoryMemoryClient(
+        base_url=base_url,
+        similarity_threshold=similarity_threshold,
+        timeout=timeout,
+        enabled=True,
+        **kwargs,
+    )
 
 
 def parse_trajectory_for_manual(trajectory: Trajectory) -> TrajectoryManual:

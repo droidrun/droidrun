@@ -14,7 +14,6 @@ dependencies = [
     "arize-phoenix>=12.3.0",
     "httpx>=0.27.0",
     "llama-index-callbacks-arize-phoenix>=0.6.1",
-    "llama-index-llms-google-genai>=0.6.2",
 ]
 requires-python = ">=3.11"
 readme = "README.md"
@@ -55,7 +54,7 @@ openai = [
     "llama-index-llms-openai-like>=0.5.1",
 ]
 google = [
-    "llama-index-llms-google-genai>=0.3.1",
+    "llama-index-llms-google-genai>=0.6.2",
 ]
 deepseek = [
     "llama-index-llms-deepseek>=0.2.1",
