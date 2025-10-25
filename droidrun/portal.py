@@ -95,7 +95,7 @@ def download_portal_apk(debug: bool = False):
             asset["downloadUrl"]
         ).startswith(ASSET_NAME):
             asset_url = asset["downloadUrl"]
-            asset_version: str = asset["name"].split("-")[-1]
+            asset_version: str = asset.get("name", os.path.basename(asset_url)).split("-")[-1]
             asset_version = asset_version.removesuffix(".apk")
             break
         else:
