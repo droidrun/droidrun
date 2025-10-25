@@ -11,6 +11,9 @@ from contextlib import nullcontext
 from functools import wraps
 
 import click
+import importlib.metadata
+import tomllib
+from pathlib import Path
 from adbutils import adb
 from rich.console import Console
 
@@ -284,7 +287,53 @@ class DroidRunCLI(click.Group):
         return super().parse_args(ctx, args)
 
 
+def _print_version(ctx, param, value):
+    """Click callback to print version and exit early when --version is passed."""
+    if not value or ctx.resilient_parsing:
+        return
+    version = None
+    try:
+        version = importlib.metadata.version("droidrun")
+        # print("debug: step 1")
+    except Exception:
+        pass
+
+    if not version:
+        try:
+            from droidrun import __version__ as pkg_version
+
+            version = pkg_version
+            # print("debug: step 2")
+        except Exception:
+            pass
+
+    if not version:
+        try:
+            repo_root = Path(__file__).resolve().parents[2]
+            pyproject = repo_root / "pyproject.toml"
+            if pyproject.exists():
+                with pyproject.open("rb") as f:
+                    data = tomllib.load(f)
+                    version = data.get("project", {}).get("version")
+            # print("debug: step 3")
+        except Exception:
+            version = None
+
+    if not version:
+        version = "unknown"
+    click.echo(f"v{version}")
+    ctx.exit()
+
+
 @click.group(cls=DroidRunCLI)
+@click.option(
+    "--version",
+    is_flag=True,
+    callback=_print_version,
+    expose_value=False,
+    is_eager=True,
+    help="Show droidrun version and exit",
+)
 def cli():
     """DroidRun - Control your Android device through LLM agents."""
     pass
