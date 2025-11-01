@@ -260,7 +260,7 @@ Now, describe the next step you will take to address the original goal: {goal}""
                 success=False,
                 reason=f"Reached max step count of {self.max_steps} steps",
             )
-            ctx.write_event_to_stream(ev)
+            # ctx.write_event_to_stream(ev)
             return ev
 
         logger.info(f"🧠 Step {self.shared_state.step_number + 1}: Thinking...")
@@ -424,7 +424,7 @@ Now, describe the next step you will take to address the original goal: {goal}""
                 logger.info(f"  - Reason: {reason}")
 
                 event = TaskEndEvent(success=success, reason=reason)
-                ctx.write_event_to_stream(event)
+                # ctx.write_event_to_stream(event)
                 return event
 
             self.remembered_info = self.tools.memory

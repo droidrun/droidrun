@@ -6,6 +6,7 @@ with live updates for agent execution progress, event streaming, and status disp
 """
 
 import logging
+import time
 from typing import List
 
 from rich.console import Console
@@ -73,6 +74,13 @@ class LogHandler(logging.Handler):
         else:
             self.console = Console()
             self.logs: List[str] = []
+
+        # Event deduplication: map signature -> last seen timestamp
+        # This suppresses immediate duplicate events (same type + key fields) which
+        # previously caused repeated rendering of success/failure messages.
+        self._event_last_seen: dict[str, float] = {}
+        # Window (seconds) during which an identical event is considered duplicate
+        self._duplicate_window = 1.0
 
     def emit(self, record):
         msg = self.format(record)
@@ -224,6 +232,24 @@ class LogHandler(logging.Handler):
     def handle_event(self, event):
         """Handle streaming events from the agent workflow."""
         logger = logging.getLogger("droidrun")
+        # here is the forced removal in case any more duplicate events are emitted in future.
+        # built a signature for event
+        try:
+            sig_parts = [event.__class__.__name__]
+            for attr in ("success", "reason", "task", "message", "post_number"):
+                sig_parts.append(str(getattr(event, attr, "")))
+            sig = "|".join(sig_parts)
+        except Exception:
+            sig = event.__class__.__name__
+
+        now = time.time()
+        last = self._event_last_seen.get(sig)
+        if last and (now - last) < self._duplicate_window:  # 1 sec gap
+            # if duplicate detected within that window , ignore the second one.
+            # showed it in debug log
+            logger.debug(f"Suppressed duplicate event: {sig}")
+            return
+        self._event_last_seen[sig] = now
 
         # Log different event types with proper names
         if isinstance(event, ScreenshotEvent):

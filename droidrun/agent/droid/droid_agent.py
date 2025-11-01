@@ -411,7 +411,7 @@ class DroidAgent(Workflow):
     ) -> FinalizeEvent:
         try:
             event = FinalizeEvent(success=ev.success, reason=ev.reason)
-            ctx.write_event_to_stream(event)
+            # ctx.write_event_to_stream(event)
             return event
         except Exception as e:
             logger.error(f"❌ Error during DroidAgent execution: {e}")
@@ -423,7 +423,7 @@ class DroidAgent(Workflow):
                 success=False,
                 reason=str(e),
             )
-            ctx.write_event_to_stream(event)
+            # ctx.write_event_to_stream(event)
             return event
 
     @step
@@ -488,7 +488,7 @@ class DroidAgent(Workflow):
                 success=False,
                 reason=f"Reached maximum steps ({self.config.agent.max_steps})",
             )
-            ctx.write_event_to_stream(event)
+            # ctx.write_event_to_stream(event)
             return event
 
         logger.info(
@@ -534,7 +534,7 @@ class DroidAgent(Workflow):
             self.shared_state.progress_status = f"Answer: {ev.manager_answer}"
 
             event = FinalizeEvent(success=success, reason=ev.manager_answer)
-            ctx.write_event_to_stream(event)
+            # ctx.write_event_to_stream(event)
             return event
 
         # Check for <script> tag in current_subgoal, then extract from full plan
