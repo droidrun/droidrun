@@ -47,7 +47,8 @@
                 "pages": [
                   "/guides/overview",
                   "/guides/device-setup",
-                  "/guides/cli"
+                  "/guides/cli",
+                  "/guides/docker"
                 ]
               },
               {
