@@ -25,6 +25,7 @@ from droidrun.config_manager import DroidrunConfig
 from droidrun.macro.cli import macro_cli
 from droidrun.portal import (
     PORTAL_PACKAGE_NAME,
+    check_portal_accessibility,
     download_portal_apk,
     enable_portal_accessibility,
     ping_portal,
@@ -79,6 +80,101 @@ def coro(f):
         return asyncio.run(f(*args, **kwargs))
 
     return wrapper
+
+
+async def check_portal_setup(
+    device_serial: str | None,
+    use_tcp: bool,
+    rich_text: bool,
+    debug_mode: bool,
+    ios: bool = False,
+) -> tuple[bool, str | None]:
+    """
+    Check if DroidRun Portal is installed and accessibility service is enabled.
+
+    Args:
+        device_serial: Device serial number or None for default device
+        use_tcp: Whether TCP mode is being used
+        rich_text: Whether to use rich text formatting
+        debug_mode: Whether debug mode is enabled
+        ios: Whether running on iOS
+
+    Returns:
+        Tuple of (is_setup_ok, warning_message)
+    """
+    # Skip check for iOS
+    if ios:
+        return True, None
+
+    try:
+        device_obj = await adb.device(device_serial)
+        if not device_obj:
+            warning = "Could not connect to device"
+            return False, warning
+
+        # Check if portal is installed
+        try:
+            packages = await device_obj.list_packages()
+            if PORTAL_PACKAGE_NAME not in packages:
+                warning = (
+                    "DroidRun Portal is not installed on the device. "
+                    "Run 'droidrun setup' to install it."
+                )
+                return False, warning
+        except Exception as e:
+            if debug_mode:
+                warning = f"Failed to check portal installation: {e}"
+            else:
+                warning = "Failed to check portal installation"
+            return False, warning
+
+        # Check if accessibility service is enabled
+        try:
+            if not await check_portal_accessibility(device_obj, debug=debug_mode):
+                warning = (
+                    "DroidRun Portal accessibility service is not enabled. "
+                    "Run 'droidrun setup' or enable it manually in Settings > Accessibility."
+                )
+                return False, warning
+        except Exception as e:
+            if debug_mode:
+                warning = f"Failed to check accessibility service: {e}"
+            else:
+                warning = "Failed to check accessibility service"
+            return False, warning
+
+        # Check communication mode
+        try:
+            if use_tcp:
+                # Test TCP connection
+                from droidrun.tools import AdbTools
+
+                tools = AdbTools(serial=device_obj.serial, use_tcp=True)
+                await tools.connect()
+                await tools.disconnect()
+            else:
+                # Test content provider
+                state = await device_obj.shell(
+                    "content query --uri content://com.droidrun.portal/state"
+                )
+                if "Row: 0 result=" not in state:
+                    warning = "DroidRun Portal is not responding via content provider"
+                    return False, warning
+        except Exception as e:
+            if debug_mode:
+                warning = f"Failed to verify portal communication: {e}"
+            else:
+                warning = "Failed to verify portal communication"
+            return False, warning
+
+        return True, None
+
+    except Exception as e:
+        if debug_mode:
+            warning = f"Error checking portal setup: {e}"
+        else:
+            warning = "Error checking portal setup"
+        return False, warning
 
 
 async def run_command(
@@ -191,6 +287,39 @@ async def run_command(
             # Platform overrides
             if ios:
                 config.device.platform = "ios"
+
+            # ================================================================
+            # STEP 1.5: Check Portal Setup (Android only)
+            # ================================================================
+
+            log_handler.update_step("Checking device setup...")
+
+            # Determine device serial and TCP mode from config
+            device_serial = device if device is not None else config.device.serial
+            use_tcp = tcp if tcp is not None else config.device.use_tcp
+
+            setup_ok, warning_msg = await check_portal_setup(
+                device_serial=device_serial,
+                use_tcp=use_tcp,
+                rich_text=config.logging.rich_text,
+                debug_mode=debug_mode,
+                ios=ios,
+            )
+
+            if not setup_ok and warning_msg:
+                # Display warning based on rich_text setting
+                if config.logging.rich_text:
+                    warning_panel = Panel(
+                        f"⚠️  {warning_msg}",
+                        border_style="yellow",
+                        padding=(0, 1),
+                    )
+                    console.print(warning_panel)
+                else:
+                    console.print(f"\n⚠️  WARNING: {warning_msg}\n")
+
+                logger.warning(warning_msg)
+                logger.warning("Continuing anyway, but execution may fail...")
 
             # ================================================================
             # STEP 2: Initialize DroidAgent with config
