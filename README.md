@@ -7,7 +7,7 @@
 <div align="center">
 
 [![Docs](https://img.shields.io/badge/Docs-📕-0D9373?style=for-the-badge)](https://docs.droidrun.ai)
-[![Cloud](https://img.shields.io/badge/Cloud-☁️-0D9373?style=for-the-badge)](http://cloud.droidrun.ai)
+[![Cloud](https://img.shields.io/badge/Cloud-☁️-0D9373?style=for-the-badge)](https://cloud.droidrun.ai/sign-in?waitlist=true)
 
 
 [![GitHub stars](https://img.shields.io/github/stars/droidrun/droidrun?style=social)](https://github.com/droidrun/droidrun/stargazers)
@@ -23,11 +23,22 @@
   <source media="(prefers-color-scheme: light)" srcset="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=983810&theme=neutral&period=daily&t=1753948125523">
   <a href="https://www.producthunt.com/products/droidrun-framework-for-mobile-agent?embed=true&utm_source=badge-top-post-badge&utm_medium=badge&utm_source=badge-droidrun" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=983810&theme=neutral&period=daily&t=1753948125523" alt="Droidrun - Give&#0032;AI&#0032;native&#0032;control&#0032;of&#0032;physical&#0032;&#0038;&#0032;virtual&#0032;phones&#0046; | Product Hunt" style="width: 200px; height: 54px;" width="200" height="54" /></a>
 </picture>
+
+
+[Deutsch](https://zdoc.app/de/droidrun/droidrun) | 
+[Español](https://zdoc.app/es/droidrun/droidrun) | 
+[français](https://zdoc.app/fr/droidrun/droidrun) | 
+[日本語](https://zdoc.app/ja/droidrun/droidrun) | 
+[한국어](https://zdoc.app/ko/droidrun/droidrun) | 
+[Português](https://zdoc.app/pt/droidrun/droidrun) | 
+[Русский](https://zdoc.app/ru/droidrun/droidrun) | 
+[中文](https://zdoc.app/zh/droidrun/droidrun)
+
 </div>
 
 
 
-Droidrun is a powerful framework for controlling Android and iOS devices through LLM agents. It allows you to automate device interactions using natural language commands. [Checkout our benchmark results](https://droidrun.ai/benchmark)
+DroidRun is a powerful framework for controlling Android and iOS devices through LLM agents. It allows you to automate device interactions using natural language commands. [Checkout our benchmark results](https://droidrun.ai/benchmark)
 
 ## Why Droidrun?
 
@@ -46,7 +57,7 @@ pip install 'droidrun[google,anthropic,openai,deepseek,ollama,dev]'
 ```
 
 ## 🚀 Quickstart
-Read on how to get Droidrun up and running within seconds in [our docs](https://docs.droidrun.ai/v3/quickstart)!
+Read on how to get droidrun up and running within seconds in [our docs](https://docs.droidrun.ai/v3/quickstart)!   
 
 [![Quickstart Video](https://img.youtube.com/vi/4WT7FXJah2I/0.jpg)](https://www.youtube.com/watch?v=4WT7FXJah2I)
 

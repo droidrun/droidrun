@@ -11,10 +11,12 @@ from pydantic import BaseModel
 logger = logging.getLogger("droidrun")
 SUPPORTED_PROVIDERS = [
     "Gemini",
+    "GoogleGenAI",
     "GenAI",
+    "OpenAI",
     "openai_llm",
-    "Anthropic_LLM",
-    "Ollama_llm",
+    "Anthropic",
+    "Ollama",
     "DeepSeek",
 ]
 
@@ -23,8 +25,6 @@ class UsageResult(BaseModel):
     request_tokens: int
     response_tokens: int
     total_tokens: int
-    thinking_tokens: int = 0
-    tool_tokens: int = 0
     requests: int
 
 
@@ -33,25 +33,21 @@ def get_usage_from_response(provider: str, chat_rsp: ChatResponse) -> UsageResul
     if not rsp:
         raise ValueError("No raw response in chat response")
 
-    if provider == "GenAI" or provider == "Gemini":
+    if provider == "Gemini" or provider == "GoogleGenAI" or provider == "GenAI":
         return UsageResult(
             request_tokens=rsp["usage_metadata"]["prompt_token_count"],
             response_tokens=rsp["usage_metadata"]["candidates_token_count"],
             total_tokens=rsp["usage_metadata"]["total_token_count"],
-            thinking_tokens=rsp["usage_metadata"].get("thoughts_token_count", 0),
-            tool_tokens=rsp["usage_metadata"].get("tool_use_prompt_token_count", 0)
-            + rsp["usage_metadata"].get("tool_use_prompt_tokens_details", 0),
             requests=1,
         )
-    elif provider == "openai_llm":
+    elif provider == "OpenAI" or provider == "OpenAILike" or provider == "openai_llm":
         from openai.types import CompletionUsage as OpenAIUsage
 
         usage: OpenAIUsage = rsp.usage
         return UsageResult(
             request_tokens=usage.prompt_tokens,
             response_tokens=usage.completion_tokens,
-            thinking_tokens=usage.thinking_tokens,
-            total_tokens=usage.total_tokens - usage.thinking_tokens,
+            total_tokens=usage.total_tokens,
             requests=1,
         )
     elif provider == "Anthropic_LLM":
@@ -64,7 +60,7 @@ def get_usage_from_response(provider: str, chat_rsp: ChatResponse) -> UsageResul
             total_tokens=usage.input_tokens + usage.output_tokens,
             requests=1,
         )
-    elif provider == "Ollama_llm":
+    elif provider == "Ollama":
         # Ollama response format uses different field names
         prompt_eval_count = rsp.get("prompt_eval_count", 0)
         eval_count = rsp.get("eval_count", 0)
@@ -83,7 +79,6 @@ def get_usage_from_response(provider: str, chat_rsp: ChatResponse) -> UsageResul
             request_tokens=usage.prompt_tokens or 0,
             response_tokens=usage.completion_tokens or 0,
             total_tokens=usage.total_tokens or 0,
-            thinking_tokens=usage.reasoning_tokens or 0,
             requests=1,
         )
 
@@ -99,8 +94,6 @@ class TokenCountingHandler(BaseCallbackHandler):
         self.request_tokens: int = 0
         self.response_tokens: int = 0
         self.total_tokens: int = 0
-        self.thinking_tokens: int = 0
-        self.tool_tokens: int = 0
         self.requests: int = 0
 
     @classmethod
@@ -114,8 +107,6 @@ class TokenCountingHandler(BaseCallbackHandler):
             request_tokens=self.request_tokens,
             response_tokens=self.response_tokens,
             total_tokens=self.total_tokens,
-            thinking_tokens=self.thinking_tokens,
-            tool_tokens=self.tool_tokens,
             requests=self.requests,
         )
 
@@ -151,8 +142,6 @@ class TokenCountingHandler(BaseCallbackHandler):
             self.request_tokens += usage.request_tokens
             self.response_tokens += usage.response_tokens
             self.total_tokens += usage.total_tokens
-            self.thinking_tokens += usage.thinking_tokens
-            self.tool_tokens += usage.tool_tokens
             self.requests += usage.requests
         except Exception as e:
             self.requests += 1

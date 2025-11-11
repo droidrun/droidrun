@@ -979,7 +979,25 @@ class DroidAgent(Workflow):
 
                     logger.error(traceback.format_exc())
 
+        # Capture final screenshot before saving trajectory
         if self.config.logging.save_trajectory != "none":
+            try:
+                screenshot_result = await self.tools_instance.take_screenshot()
+                if isinstance(screenshot_result, tuple):
+                    success, screenshot = screenshot_result
+                    if success and screenshot:
+                        ctx.write_event_to_stream(
+                            ScreenshotEvent(screenshot=screenshot)
+                        )
+                        logger.debug("📸 Final screenshot captured")
+                elif screenshot_result:
+                    ctx.write_event_to_stream(
+                        ScreenshotEvent(screenshot=screenshot_result)
+                    )
+                    logger.debug("📸 Final screenshot captured")
+            except Exception as e:
+                logger.warning(f"Failed to capture final screenshot: {e}")
+
             self.trajectory_writer.write_final(
                 self.trajectory, self.config.logging.trajectory_gifs
             )

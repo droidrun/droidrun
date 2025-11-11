@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "almond",
-  "name": "Droidrun",
+  "name": "DroidRun",
   "colors": {
     "primary": "#0D9373",
     "light": "#07C983",
@@ -47,7 +47,9 @@
                 "pages": [
                   "/guides/overview",
                   "/guides/device-setup",
-                  "/guides/cli"
+                  "/guides/cli",
+                  "/guides/docker",
+                  "/guides/migration-v3-to-v4"
                 ]
               },
               {
@@ -75,8 +77,7 @@
           },
           {
             "product": "Cloud API",
-            "description": "Managed Cloud API",
-            "openapi": "https://api.droidrun.ai/v1/openapi.json"
+            "description": "Managed Cloud API"
           }
         ]
       },

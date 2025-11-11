@@ -446,9 +446,13 @@ agent = DroidAgent(
 
     # LLMs
     llms={
-        "manager": OpenAI(model="gpt-4o"),
-        "executor": Gemini(model="models/gemini-2.5-flash"),
-        "codeact": Gemini(model="models/gemini-2.5-pro")
+        "manager": OpenAI(model="gpt-4o"),                    # Planning
+        "executor": Gemini(model="models/gemini-2.5-flash"),  # Action selection
+        "codeact": Gemini(model="models/gemini-2.5-pro"),     # Code generation
+        "text_manipulator": Gemini(model="models/gemini-2.5-flash"),  # Text input
+        "app_opener": OpenAI(model="gpt-4o-mini"),            # App launching
+        "scripter": Gemini(model="models/gemini-2.5-flash"),  # Off-device scripts
+        "structured_output": Gemini(model="models/gemini-2.5-flash"),  # Output extraction
     },
 
     # Custom tools
