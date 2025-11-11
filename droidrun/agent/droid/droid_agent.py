@@ -60,6 +60,7 @@ from droidrun.config_manager.config_manager import (
     TracingConfig,
 )
 from droidrun.credential_manager import load_credential_manager
+from droidrun.portal import PORTAL_PACKAGE_NAME, check_portal_accessibility
 from droidrun.telemetry import (
     DroidAgentFinalizeEvent,
     DroidAgentInitEvent,
@@ -320,6 +321,91 @@ class DroidAgent(Workflow):
 
         logger.info("✅ DroidAgent initialized successfully.")
 
+    async def _check_portal_setup(self):
+        """
+        Check if DroidRun Portal is installed and accessibility service is enabled.
+        Logs warnings if setup is incomplete but continues execution.
+        """
+        try:
+            from async_adbutils import adb
+
+            # Get device
+            device_serial = self.resolved_device_config.serial
+            device_obj = await adb.device(device_serial)
+            if not device_obj:
+                logger.warning("⚠️  Could not connect to device for portal check")
+                return
+
+            # Check if portal is installed
+            try:
+                packages = await device_obj.list_packages()
+                if PORTAL_PACKAGE_NAME not in packages:
+                    logger.warning(
+                        "⚠️  DroidRun Portal is not installed on the device. "
+                        "Run 'droidrun setup' to install it. "
+                        "Continuing anyway, but execution may fail..."
+                    )
+                    return
+            except Exception as e:
+                if self.config.logging.debug:
+                    logger.warning(f"⚠️  Failed to check portal installation: {e}")
+                else:
+                    logger.warning("⚠️  Failed to check portal installation")
+                return
+
+            # Check if accessibility service is enabled
+            try:
+                if not await check_portal_accessibility(
+                    device_obj, debug=self.config.logging.debug
+                ):
+                    logger.warning(
+                        "⚠️  DroidRun Portal accessibility service is not enabled. "
+                        "Run 'droidrun setup' or enable it manually in Settings > Accessibility. "
+                        "Continuing anyway, but execution may fail..."
+                    )
+                    return
+            except Exception as e:
+                if self.config.logging.debug:
+                    logger.warning(f"⚠️  Failed to check accessibility service: {e}")
+                else:
+                    logger.warning("⚠️  Failed to check accessibility service")
+                return
+
+            # Check communication mode
+            try:
+                if self.resolved_device_config.use_tcp:
+                    # Test TCP connection
+                    from droidrun.tools import AdbTools
+
+                    tools = AdbTools(serial=device_obj.serial, use_tcp=True)
+                    await tools.connect()
+                    await tools.disconnect()
+                else:
+                    # Test content provider
+                    state = await device_obj.shell(
+                        "content query --uri content://com.droidrun.portal/state"
+                    )
+                    if "Row: 0 result=" not in state:
+                        logger.warning(
+                            "⚠️  DroidRun Portal is not responding via content provider. "
+                            "Continuing anyway, but execution may fail..."
+                        )
+                        return
+            except Exception as e:
+                if self.config.logging.debug:
+                    logger.warning(f"⚠️  Failed to verify portal communication: {e}")
+                else:
+                    logger.warning("⚠️  Failed to verify portal communication")
+                return
+
+            logger.info("✅ DroidRun Portal is properly set up")
+
+        except Exception as e:
+            if self.config.logging.debug:
+                logger.warning(f"⚠️  Error checking portal setup: {e}")
+            else:
+                logger.warning("⚠️  Error checking portal setup")
+
     def run(self, *args, **kwargs) -> Awaitable[ResultEvent] | WorkflowHandler:
         handler = super().run(*args, **kwargs)  # type: ignore[assignment]
         return handler
@@ -447,6 +533,10 @@ class DroidAgent(Workflow):
                 self.executor_agent.tools_instance = self.tools_instance
 
         self.tools_instance._set_context(ctx)
+
+        # Check portal setup for Android devices
+        if self.resolved_device_config.platform != "ios":
+            await self._check_portal_setup()
 
         if self.config.logging.save_trajectory != "none":
             self.trajectory_writer.write(self.trajectory, stage="init")
