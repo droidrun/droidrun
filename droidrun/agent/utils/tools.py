@@ -8,12 +8,15 @@ if TYPE_CHECKING:
 from droidrun.agent.oneflows.app_starter_workflow import AppStarter
 
 
-async def create_tools_from_config(device_config: "DeviceConfig") -> "Tools":
+async def create_tools_from_config(
+    device_config: "DeviceConfig", vision_enabled: bool = True
+) -> "Tools":
     """
     Create Tools instance from DeviceConfig.
 
     Args:
         device_config: Device configuration
+        vision_enabled: Whether vision is enabled (for filter selection)
 
     Returns:
         AdbTools or IOSTools based on config
@@ -34,7 +37,7 @@ async def create_tools_from_config(device_config: "DeviceConfig") -> "Tools":
             if not devices:
                 raise ValueError("No connected Android devices found.")
             device_serial = devices[0].serial
-        return AdbTools(serial=device_serial)
+        return AdbTools(serial=device_serial, vision_enabled=vision_enabled)
     else:
         # iOS: require explicit device URL
         if device_serial is None:
@@ -47,6 +50,7 @@ async def resolve_tools_instance(
     device_config: "DeviceConfig",
     tools_config_fallback: "ToolsConfig | None" = None,
     credential_manager=None,
+    vision_enabled: bool = True,
 ) -> tuple["Tools", "ToolsConfig"]:
     """
     Resolve Tools instance and ToolsConfig from various input types.
@@ -61,6 +65,7 @@ async def resolve_tools_instance(
         device_config: Device configuration for creating Tools if needed
         tools_config_fallback: Fallback ToolsConfig when tools is a Tools instance or None
         credential_manager: Optional credential manager to attach to Tools
+        vision_enabled: Whether vision is enabled (default: True)
 
     Returns:
         Tuple of (tools_instance, tools_config):
@@ -89,12 +94,16 @@ async def resolve_tools_instance(
 
     # Case 2: ToolsConfig provided
     elif tools is not None and isinstance(tools, ToolsConfig):
-        tools_instance = await create_tools_from_config(device_config)
+        tools_instance = await create_tools_from_config(
+            device_config, vision_enabled=vision_enabled
+        )
         tools_cfg = tools
 
     # Case 3: None provided
     else:
-        tools_instance = await create_tools_from_config(device_config)
+        tools_instance = await create_tools_from_config(
+            device_config, vision_enabled=vision_enabled
+        )
         tools_cfg = tools_config_fallback if tools_config_fallback else ToolsConfig()
 
     # Attach credential manager if provided

@@ -21,7 +21,7 @@ from droidrun.tools.tools import Tools
 from droidrun.tools.portal_client import PortalClient
 from async_adbutils import adb
 import asyncio
-from droidrun.tools.filters import TreeFilter, ConciseFilter
+from droidrun.tools.filters import TreeFilter, ConciseFilter, DetailedFilter
 from droidrun.tools.formatters import TreeFormatter, IndexedFormatter
 
 logger = logging.getLogger("droidrun")
@@ -41,6 +41,7 @@ class AdbTools(Tools):
         credential_manager=None,
         tree_filter: TreeFilter = None,
         tree_formatter: TreeFormatter = None,
+        vision_enabled: bool = True,
     ) -> None:
         """Initialize the AdbTools instance.
 
@@ -51,8 +52,9 @@ class AdbTools(Tools):
             app_opener_llm: LLM instance for app opening workflow (optional)
             text_manipulator_llm: LLM instance for text manipulation (optional)
             credential_manager: CredentialManager instance for secret handling (optional)
-            tree_filter: Filter for accessibility tree (default: ConciseFilter)
+            tree_filter: Filter for accessibility tree (default: None, uses logic based on vision_enabled)
             tree_formatter: Formatter for filtered tree (default: IndexedFormatter)
+            vision_enabled: Whether vision is enabled (default: True). Used to select default filter.
         """
         self._serial = serial
         self._use_tcp = use_tcp
@@ -78,8 +80,12 @@ class AdbTools(Tools):
         # Credential manager for secret handling
         self.credential_manager = credential_manager
 
-        # Filter and formatter
-        self.tree_filter = tree_filter or ConciseFilter()
+        if tree_filter:
+            self.tree_filter = tree_filter
+        else:
+            self.tree_filter = ConciseFilter() if vision_enabled else DetailedFilter()
+            logger.debug(f"Selected {self.tree_filter.__class__.__name__} (vision_enabled={vision_enabled})")
+
         self.tree_formatter = tree_formatter or IndexedFormatter()
 
         # Caches

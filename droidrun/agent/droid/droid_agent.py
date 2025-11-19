@@ -441,11 +441,18 @@ class DroidAgent(Workflow):
         self.custom_tools.update({**auto_custom_tools, **self.user_custom_tools})
 
         if self.tools_instance is None:
+            # Determine if vision is enabled based on the active agent role
+            if self.config.agent.reasoning:
+                vision_enabled = self.config.agent.manager.vision
+            else:
+                vision_enabled = self.config.agent.codeact.vision
+
             tools_instance, tools_config_resolved = await resolve_tools_instance(
                 tools=self.tools_fallback,
                 device_config=self.resolved_device_config,
                 tools_config_fallback=self.config.tools,
                 credential_manager=self.credential_manager,
+                vision_enabled=vision_enabled,
             )
 
             self.tools_instance = tools_instance
