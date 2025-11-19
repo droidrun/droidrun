@@ -27,7 +27,6 @@ from droidrun.agent.common.constants import LLM_HISTORY_LIMIT
 from droidrun.agent.common.events import RecordUIStateEvent, ScreenshotEvent
 from droidrun.agent.usage import get_usage_from_response
 from droidrun.agent.utils import chat_utils
-from droidrun.agent.utils.device_state_formatter import format_device_state
 from droidrun.agent.utils.executer import ExecuterState, SimpleCodeExecutor
 from droidrun.agent.utils.prompt_resolver import PromptResolver
 from droidrun.agent.utils.tools import (
@@ -312,12 +311,9 @@ Now, describe the next step you will take to address the original goal: {goal}""
 
         # Get and format device state using unified formatter
         try:
-            # Get raw state from device
-            raw_state = await self.tools.get_state()
-
-            # Format using unified function (returns 4 values)
-            formatted_text, focused_text, a11y_tree, phone_state = format_device_state(
-                raw_state
+            # Get raw state from device - returns 4 values directly
+            formatted_text, focused_text, a11y_tree, phone_state = (
+                await self.tools.get_state()
             )
 
             # Update shared_state if available

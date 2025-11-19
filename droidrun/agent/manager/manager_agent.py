@@ -29,7 +29,6 @@ from droidrun.agent.utils.chat_utils import (
     remove_empty_messages,
     convert_messages_to_chatmessages,
 )
-from droidrun.agent.utils.device_state_formatter import format_device_state
 from droidrun.agent.utils.inference import acall_with_retries
 from droidrun.agent.utils.prompt_resolver import PromptResolver
 from droidrun.agent.utils.tools import build_custom_tool_descriptions
@@ -414,9 +413,9 @@ class ManagerAgent(Workflow):
         # ====================================================================
         # Step 1: Get and format device state using unified formatter
         # ====================================================================
-        raw_state = await self.tools_instance.get_state()
-        formatted_text, focused_text, a11y_tree, phone_state = format_device_state(
-            raw_state
+        # Tools now returns formatted tuple directly
+        formatted_text, focused_text, a11y_tree, phone_state = (
+            await self.tools_instance.get_state()
         )
 
         # Update shared state (previous ← current, current ← new)

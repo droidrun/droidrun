@@ -21,7 +21,8 @@ from droidrun.tools.tools import Tools
 from droidrun.tools.portal_client import PortalClient
 from async_adbutils import adb
 import asyncio
-from droidrun.tools.a11y_tree_filter import filter_a11y_tree_to_interactive_elements
+from droidrun.tools.filters import TreeFilter, ConciseFilter
+from droidrun.tools.formatters import TreeFormatter, IndexedFormatter
 
 logger = logging.getLogger("droidrun")
 PORTAL_DEFAULT_TCP_PORT = 8080
@@ -38,6 +39,8 @@ class AdbTools(Tools):
         app_opener_llm=None,
         text_manipulator_llm=None,
         credential_manager=None,
+        tree_filter: TreeFilter = None,
+        tree_formatter: TreeFormatter = None,
     ) -> None:
         """Initialize the AdbTools instance.
 
@@ -48,6 +51,8 @@ class AdbTools(Tools):
             app_opener_llm: LLM instance for app opening workflow (optional)
             text_manipulator_llm: LLM instance for text manipulation (optional)
             credential_manager: CredentialManager instance for secret handling (optional)
+            tree_filter: Filter for accessibility tree (default: ConciseFilter)
+            tree_formatter: Formatter for filtered tree (default: IndexedFormatter)
         """
         self._serial = serial
         self._use_tcp = use_tcp
@@ -72,6 +77,14 @@ class AdbTools(Tools):
 
         # Credential manager for secret handling
         self.credential_manager = credential_manager
+
+        # Filter and formatter
+        self.tree_filter = tree_filter or ConciseFilter()
+        self.tree_formatter = tree_formatter or IndexedFormatter()
+
+        # Caches
+        self.raw_tree_cache = None
+        self.filtered_tree_cache = None
 
     async def connect(self) -> None:
         """
@@ -701,61 +714,58 @@ class AdbTools(Tools):
         """
         return self.memory.copy()
 
-    async def get_state(self) -> Dict[str, Any]:
+    async def get_state(self) -> Tuple[str, str, List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Get both the a11y tree and phone state in a single call using the combined /state endpoint.
+        Get device state with configurable filtering.
 
         Returns:
-            Dictionary containing both 'a11y_tree' and 'phone_state' data
+            Tuple of (formatted_text, focused_text, a11y_tree, phone_state)
         """
         await self._ensure_connected()
-        try:
-            logger.debug("Getting state")
 
-            # Use PortalClient for state (automatic TCP/content provider selection)
-            combined_data = await self.portal.get_state()
+        max_retries = 3
+        last_error = None
 
-            # Handle error responses
-            if "error" in combined_data:
-                return combined_data
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"Getting state (attempt {attempt + 1}/{max_retries})")
 
-            if "a11y_tree" not in combined_data:
-                return {
-                    "error": "Missing Data",
-                    "message": "a11y_tree not found in combined state data",
-                }
+                combined_data = await self.portal.get_state()
 
-            if "phone_state" not in combined_data:
-                return {
-                    "error": "Missing Data",
-                    "message": "phone_state not found in combined state data",
-                }
+                if "error" in combined_data:
+                    raise Exception(f"Portal returned error: {combined_data.get('message', 'Unknown error')}")
 
-            if "device_context" not in combined_data:
-                return {
-                    "error": "Missing Data",
-                    "message": "device_context not found in combined state data",
-                }
+                required_keys = ["a11y_tree", "phone_state", "device_context"]
+                missing_keys = [key for key in required_keys if key not in combined_data]
+                if missing_keys:
+                    raise Exception(f"Missing data in state: {', '.join(missing_keys)}")
 
-            full_tree = combined_data["a11y_tree"]
-            device_context = combined_data["device_context"]
+                self.raw_tree_cache = combined_data["a11y_tree"]
 
-            filtered_elements = filter_a11y_tree_to_interactive_elements(
-                full_tree, device_context
-            )
+                self.filtered_tree_cache = self.tree_filter.filter(
+                    self.raw_tree_cache,
+                    combined_data["device_context"]
+                )
 
-            self.clickable_elements_cache = filtered_elements
+                formatted_text, focused_text, a11y_tree, phone_state = self.tree_formatter.format(
+                    self.filtered_tree_cache,
+                    combined_data["phone_state"]
+                )
 
-            return {
-                "a11y_tree": filtered_elements,
-                "phone_state": combined_data["phone_state"],
-            }
+                self.clickable_elements_cache = a11y_tree
 
-        except Exception as e:
-            return {
-                "error": str(e),
-                "message": f"Error getting combined state: {str(e)}",
-            }
+                return (formatted_text, focused_text, a11y_tree, phone_state)
+
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"get_state attempt {attempt + 1} failed: {last_error}")
+
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.5)
+                else:
+                    error_msg = f"Failed to get state after {max_retries} attempts: {last_error}"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
 
     async def ping(self) -> Dict[str, Any]:
         """
