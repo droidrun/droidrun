@@ -461,6 +461,50 @@ class AdbTools(Tools):
         except Exception as e:
             return f"Error sending text input: {str(e)}"
 
+
+    @Tools.ui_action
+    async def clear_text(self, index: int = -1) -> str:
+        """
+        Clear all text from a text field using the Portal's clear + fallback.
+
+        This is fast and reliable - uses Portal's clear functionality with
+        a fallback to delete keys if needed.
+
+        Args:
+            index: Index of the element to clear. If -1, clears the focused element.
+
+        Returns:
+            Result message
+        """
+        await self._ensure_connected()
+        try:
+            # Focus the element if index is provided
+            if index != -1:
+                await self.tap_by_index(index)
+                await asyncio.sleep(0.1)  # Let it focus
+
+            # Method 1: Use Portal's clear by typing empty string with clear=True
+            # This is the fastest method when it works
+            success = await self.portal.inputtext("", clear=True)
+
+            if success:
+                logger.info("✅Text field cleared using Portal")
+                print("Text field cleared")
+                return "Text field cleared successfully"
+
+            # Method 2: Fallback to sending 50 DELETE keys (fast enough, covers most cases)
+            logger.info("Portal clear didn't work, using DELETE keys fallback")
+            for _ in range(50):
+                await self.device.keyevent(67)  # KEYCODE_DEL (backspace)
+
+            logger.info("✅Text field cleared using DELETE keys")
+            print("Text field cleared")
+            return "Text field cleared successfully"
+
+        except Exception as e:
+            logger.error(f"Error clearing text: {e}")
+            return f"Error clearing text: {str(e)}"
+
     @Tools.ui_action
     async def back(self) -> str:
         """

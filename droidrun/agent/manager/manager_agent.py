@@ -479,6 +479,8 @@ class ManagerAgent(Workflow):
         # ====================================================================
         # Step 3: Detect text manipulation mode
         # ====================================================================
+        # Show text manipulation section when there's focused text with content
+        # (TEXT_TASK is now only for complex text editing, not simple clearing)
         focused_text_clean = focused_text.replace("'", "").strip()
         has_text_to_modify = focused_text_clean != ""
 

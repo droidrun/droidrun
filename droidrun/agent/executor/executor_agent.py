@@ -30,6 +30,7 @@ from droidrun.agent.utils.inference import acall_with_retries
 from droidrun.agent.utils.prompt_resolver import PromptResolver
 from droidrun.agent.utils.tools import (
     ATOMIC_ACTION_SIGNATURES,
+    clear_text,
     click,
     long_press,
     open_app,
@@ -365,6 +366,19 @@ class ExecutorAgent(Workflow):
 
                 result = await type(text, index, tools=self.tools_instance)
                 return True, "None", f"Typed '{text}' into element at index {index}"
+
+            elif action_type == "clear_text":
+                index = action_dict.get("index", -1)
+
+                if index == -1:
+                    return (
+                        False,
+                        "Missing 'index' parameter",
+                        "Failed: clear_text requires index",
+                    )
+
+                result = await clear_text(index, tools=self.tools_instance)
+                return True, "None", f"Cleared text at index {index}" 
 
             elif action_type == "system_button":
                 button = action_dict.get("button")

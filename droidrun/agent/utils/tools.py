@@ -154,6 +154,22 @@ async def type(text: str, index: int, *, tools: "Tools" = None, **kwargs) -> str
     return await tools.input_text(text, index)
 
 
+async def clear_text(index: int, *, tools: "Tools" = None, **kwargs) -> str:
+    """
+    Clear all text from the element at the given index using robust key events.
+
+    This is much faster and more reliable than using the text manipulator.
+    Use this action when you need to delete/remove/clear text from an input field.
+    Args:
+        index: The index of the element to clear
+        tools: The Tools instance (injected automatically)
+    Returns:
+        Result message from the clear operation
+    """
+    if tools is None:
+        raise ValueError("tools parameter is required")
+    return await tools.clear_text(index)
+
 async def system_button(button: str, *, tools: "Tools" = None, **kwargs) -> str:
     """
     Press a system button (back, home, or enter).

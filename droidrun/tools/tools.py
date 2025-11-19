@@ -100,6 +100,13 @@ class Tools(ABC):
         pass
 
     @abstractmethod
+    async def clear_text(self, index: int = -1) -> str:
+        """
+        Clear all text from a text field.
+        """
+        pass
+
+    @abstractmethod
     async def back(self) -> str:
         """
         Press the back button.
