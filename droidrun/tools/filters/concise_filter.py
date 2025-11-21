@@ -29,54 +29,36 @@ class ConciseFilter(TreeFilter):
         screen_width = screen_bounds.get("width", 1080)
         screen_height = screen_bounds.get("height", 2400)
 
+        if not self._intersects_screen(node, screen_width, screen_height):
+            return None
+        if not self._min_size(node, min_size):
+            return None
+
         filtered_children = []
         for child in node.get("children", []):
             filtered_child = self._filter_node(child, screen_bounds, filtering_params)
             if filtered_child:
                 filtered_children.append(filtered_child)
 
-        if not self._in_bounds(node, screen_width, screen_height):
-            if filtered_children:
-                return {**node, "children": filtered_children}
-            return None
-
-        if not self._min_size(node, min_size):
-            if filtered_children:
-                return {**node, "children": filtered_children}
-            return None
-
-        if not self._interactive(node):
-            if filtered_children:
-                return {**node, "children": filtered_children}
-            return None
-
         return {**node, "children": filtered_children}
 
     @staticmethod
-    def _in_bounds(node: Dict[str, Any], width: int, height: int) -> bool:
-        """Check if element is within screen bounds."""
+    def _intersects_screen(node: Dict[str, Any], screen_width: int, screen_height: int) -> bool:
+        """Check if element intersects screen bounds."""
         bounds = node.get("boundsInScreen", {})
         left = bounds.get("left", 0)
         top = bounds.get("top", 0)
         right = bounds.get("right", 0)
         bottom = bounds.get("bottom", 0)
-
-        return (left >= 0 and top >= 0 and
-                right <= width and bottom <= height)
+        return not (right <= 0 or bottom <= 0 or left >= screen_width or top >= screen_height)
 
     @staticmethod
     def _min_size(node: Dict[str, Any], min_size: int) -> bool:
         """Check if element meets minimum size."""
         bounds = node.get("boundsInScreen", {})
-        width = bounds.get("right", 0) - bounds.get("left", 0)
-        height = bounds.get("bottom", 0) - bounds.get("top", 0)
-
-        return width > min_size and height > min_size
-
-    @staticmethod
-    def _interactive(node: Dict[str, Any]) -> bool:
-        """Check if element is interactive."""
-        return True
+        w = bounds.get("right", 0) - bounds.get("left", 0)
+        h = bounds.get("bottom", 0) - bounds.get("top", 0)
+        return w > min_size and h > min_size
 
     def get_name(self) -> str:
         """Return filter name."""
