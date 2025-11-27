@@ -49,7 +49,8 @@ Action Related:
 Text Related Operations:
 - Activated input box: If an input box is activated, it may have a cursor inside it and the keyboard is visible. If there is no cursor on the screen but the keyboard is visible, it may be because the cursor is blinking. The color of the activated input box will be highlighted. If you are not sure whether the input box is activated, click it before typing.
 - To input some text: first click the input box that you want to input, make sure the correct input box is activated and the keyboard is visible, then use `type` action to enter the specified text.
-- To clear the text: long press the backspace button in the keyboard.
+- **To clear/delete text from a field: Use the clear_text action!** Example: {"action": "clear_text", "index": 9}. This is fast and reliable.
+- Do NOT use type action with empty string ("") to clear text - it will not work!
 - To copy some text: first long press the text you want to copy, then click the `copy` button in bar.
 - To paste text into a text box: first long press the text box, then click the `paste` button in bar.
 

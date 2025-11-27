@@ -46,13 +46,16 @@ General:
 {% if text_manipulation_enabled %}
 
 <text_manipulation>
-1. Use **TEXT_TASK:** prefix in your plan when you need to modify text in the currently focused text input field
-2. TEXT_TASK is for editing, formatting, or transforming existing text content in text boxes using Python code
-3. Do not use TEXT_TASK for extracting text from messages, typing new text, or composing messages
-4. The focused text field contains editable text that you can modify
-5. Example plan item: 'TEXT_TASK: Add "Hello World" at the beginning of the text'
-6. Always use TEXT_TASK for modifying text, do not try to select the text to copy/cut/paste or adjust the text
-</text_manipulation>
+1. The Executor has a clear_text action that can quickly clear text fields - use it for simple deletions
+2. For simple clearing: "Clear the phone number field (index 9)" - Executor will use clear_text action
+3. Use TEXT_TASK: prefix ONLY for complex text editing (formatting, string manipulation, conditional logic)
+4. Do not use TEXT_TASK for extracting text from messages or composing brand new messages from scratch
+5. Example plan items:
+    - Simple: "Clear the phone number field (index 9)" → Executor uses clear_text
+    - Simple: "Type '555' into field 9" → Executor uses type
+    - Complex: "TEXT_TASK: Capitalize all words in the current text"
+    - Complex: "TEXT_TASK: Add @example.com domain to the username"
+6. Do not tell executor to use empty type commands - it won't work
 {% endif %}
 
 Memory Usage:
