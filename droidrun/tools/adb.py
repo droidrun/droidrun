@@ -207,23 +207,27 @@ class AdbTools(Tools):
         # Calculate the center of the element
         center_x = (left + right) // 2
         center_y = (top + bottom) // 2
-        
+
         # Add randomization to make tap less detectable
         # Randomize within 40% of the element's width/height from center
         width = right - left
         height = bottom - top
-        
+
         # Calculate random offsets (within 40% of half-width/half-height)
         max_x_offset = int((width / 2) * 0.4)
         max_y_offset = int((height / 2) * 0.4)
-        
+
         # Apply random offset while ensuring we stay within bounds
-        x_offset = random.randint(-max_x_offset, max_x_offset) if max_x_offset > 0 else 0
-        y_offset = random.randint(-max_y_offset, max_y_offset) if max_y_offset > 0 else 0
-        
+        x_offset = (
+            random.randint(-max_x_offset, max_x_offset) if max_x_offset > 0 else 0
+        )
+        y_offset = (
+            random.randint(-max_y_offset, max_y_offset) if max_y_offset > 0 else 0
+        )
+
         x = center_x + x_offset
         y = center_y + y_offset
-        
+
         # Ensure coordinates stay within element bounds (safety check)
         x = max(left, min(right, x))
         y = max(top, min(bottom, y))
@@ -371,6 +375,69 @@ class AdbTools(Tools):
         await self._ensure_connected()
         return await self.tap_by_index(index)
 
+    def _generate_curved_path(
+        self, start_x: int, start_y: int, end_x: int, end_y: int, num_points: int = 15
+    ) -> List[Tuple[int, int]]:
+        """
+        Generate a curved path using a quadratic Bezier curve with randomized control point.
+
+        Args:
+            start_x: Starting X coordinate
+            start_y: Starting Y coordinate
+            end_x: Ending X coordinate
+            end_y: Ending Y coordinate
+            num_points: Number of intermediate points to generate
+
+        Returns:
+            List of (x, y) coordinate tuples along the curve
+        """
+        # Calculate distance to determine curve intensity
+        distance = ((end_x - start_x) ** 2 + (end_y - start_y) ** 2) ** 0.5
+
+        # Only add curve for distances > 100 pixels
+        if distance <= 100:
+            # For short swipes, return straight line
+            return [(start_x, start_y), (end_x, end_y)]
+
+        # Calculate midpoint
+        mid_x = (start_x + end_x) / 2
+        mid_y = (start_y + end_y) / 2
+
+        # Calculate perpendicular offset for control point
+        # Random curve intensity between 10-25% of distance
+        curve_intensity = random.uniform(0.1, 0.25)
+        max_offset = distance * curve_intensity
+        offset = random.uniform(-max_offset, max_offset)
+
+        # Calculate perpendicular direction
+        dx = end_x - start_x
+        dy = end_y - start_y
+
+        # Perpendicular vector is (-dy, dx) normalized
+        if distance > 0:
+            perp_x = -dy / distance
+            perp_y = dx / distance
+
+            # Control point with perpendicular offset
+            control_x = mid_x + perp_x * offset
+            control_y = mid_y + perp_y * offset
+        else:
+            control_x = mid_x
+            control_y = mid_y
+
+        # Generate points along quadratic Bezier curve
+        points = []
+        for i in range(num_points):
+            t = i / (num_points - 1)
+
+            # Quadratic Bezier formula: B(t) = (1-t)²P₀ + 2(1-t)tP₁ + t²P₂
+            x = (1 - t) ** 2 * start_x + 2 * (1 - t) * t * control_x + t**2 * end_x
+            y = (1 - t) ** 2 * start_y + 2 * (1 - t) * t * control_y + t**2 * end_y
+
+            points.append((int(x), int(y)))
+
+        return points
+
     @Tools.ui_action
     async def swipe(
         self,
@@ -381,7 +448,7 @@ class AdbTools(Tools):
         duration_ms: float = 1000,
     ) -> bool:
         """
-        Performs a straight-line swipe gesture on the device screen.
+        Performs a curved swipe gesture using motion events to simulate human-like movement.
         To perform a hold (long press), set the start and end coordinates to the same values and increase the duration as needed.
         Args:
             start_x: Starting X coordinate
@@ -406,15 +473,47 @@ class AdbTools(Tools):
                 )
                 self._ctx.write_event_to_stream(swipe_event)
 
-            await self.device.swipe(
-                start_x, start_y, end_x, end_y, float(duration_ms / 1000)
-            )
+            # Check if it's a hold gesture (start == end)
+            is_hold = start_x == end_x and start_y == end_y
+
+            if is_hold:
+                # Use simple swipe for hold gestures
+                await self.device.swipe(
+                    start_x, start_y, end_x, end_y, float(duration_ms / 1000)
+                )
+            else:
+                # Generate curved path for regular swipes
+                path_points = self._generate_curved_path(start_x, start_y, end_x, end_y)
+
+                if len(path_points) < 2:
+                    # Fallback to straight swipe
+                    await self.device.swipe(
+                        start_x, start_y, end_x, end_y, float(duration_ms / 1000)
+                    )
+                else:
+                    # Execute curved swipe using motion events
+                    # Start touch at first point
+                    x0, y0 = path_points[0]
+                    await self.device.shell(f"input motionevent DOWN {x0} {y0}")
+
+                    # Calculate delay between points
+                    delay_between_points = (duration_ms / 1000) / len(path_points)
+
+                    # Move through intermediate points
+                    for x, y in path_points[1:]:
+                        await asyncio.sleep(delay_between_points)
+                        await self.device.shell(f"input motionevent MOVE {x} {y}")
+
+                    # End touch at last point
+                    x_end, y_end = path_points[-1]
+                    await self.device.shell(f"input motionevent UP {x_end} {y_end}")
+
             await asyncio.sleep(duration_ms / 1000)
             print(
                 f"Swiped from ({start_x}, {start_y}) to ({end_x}, {end_y}) in {duration_ms} milliseconds"
             )
             return True
-        except ValueError as e:
+        except Exception as e:
             print(f"Error: {str(e)}")
             return False
 
@@ -483,19 +582,19 @@ class AdbTools(Tools):
 
             parts = text.split(" ")
             parts = [part + " " for part in parts[:-1]] + [parts[-1]]
-            
+
             # Type each part with random delays between them
             for i, part in enumerate(parts):
                 if not part:  # Skip empty parts
                     continue
-                    
+
                 # Clear only before typing the first part
                 should_clear = clear and i == 0
                 success = await self.portal.input_text(part, should_clear)
-                
+
                 if not success:
                     return f"Error: Text input failed at part {i}"
-                
+
                 # Random delay between parts (100-300ms), but not after the last part
                 if i < len(parts) - 1:
                     await asyncio.sleep(random.uniform(0.1, 0.3))
