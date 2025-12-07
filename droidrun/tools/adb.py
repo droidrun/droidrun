@@ -205,8 +205,28 @@ class AdbTools(Tools):
             ) from e
 
         # Calculate the center of the element
-        x = (left + right) // 2
-        y = (top + bottom) // 2
+        center_x = (left + right) // 2
+        center_y = (top + bottom) // 2
+        
+        # Add randomization to make tap less detectable
+        # Randomize within 40% of the element's width/height from center
+        width = right - left
+        height = bottom - top
+        
+        # Calculate random offsets (within 40% of half-width/half-height)
+        max_x_offset = int((width / 2) * 0.4)
+        max_y_offset = int((height / 2) * 0.4)
+        
+        # Apply random offset while ensuring we stay within bounds
+        x_offset = random.randint(-max_x_offset, max_x_offset) if max_x_offset > 0 else 0
+        y_offset = random.randint(-max_y_offset, max_y_offset) if max_y_offset > 0 else 0
+        
+        x = center_x + x_offset
+        y = center_y + y_offset
+        
+        # Ensure coordinates stay within element bounds (safety check)
+        x = max(left, min(right, x))
+        y = max(top, min(bottom, y))
 
         return x, y
 
