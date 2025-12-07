@@ -207,23 +207,27 @@ class AdbTools(Tools):
         # Calculate the center of the element
         center_x = (left + right) // 2
         center_y = (top + bottom) // 2
-        
+
         # Add randomization to make tap less detectable
         # Randomize within 40% of the element's width/height from center
         width = right - left
         height = bottom - top
-        
+
         # Calculate random offsets (within 40% of half-width/half-height)
         max_x_offset = int((width / 2) * 0.4)
         max_y_offset = int((height / 2) * 0.4)
-        
+
         # Apply random offset while ensuring we stay within bounds
-        x_offset = random.randint(-max_x_offset, max_x_offset) if max_x_offset > 0 else 0
-        y_offset = random.randint(-max_y_offset, max_y_offset) if max_y_offset > 0 else 0
-        
+        x_offset = (
+            random.randint(-max_x_offset, max_x_offset) if max_x_offset > 0 else 0
+        )
+        y_offset = (
+            random.randint(-max_y_offset, max_y_offset) if max_y_offset > 0 else 0
+        )
+
         x = center_x + x_offset
         y = center_y + y_offset
-        
+
         # Ensure coordinates stay within element bounds (safety check)
         x = max(left, min(right, x))
         y = max(top, min(bottom, y))
@@ -483,19 +487,19 @@ class AdbTools(Tools):
 
             parts = text.split(" ")
             parts = [part + " " for part in parts[:-1]] + [parts[-1]]
-            
+
             # Type each part with random delays between them
             for i, part in enumerate(parts):
                 if not part:  # Skip empty parts
                     continue
-                    
+
                 # Clear only before typing the first part
                 should_clear = clear and i == 0
                 success = await self.portal.input_text(part, should_clear)
-                
+
                 if not success:
                     return f"Error: Text input failed at part {i}"
-                
+
                 # Random delay between parts (100-300ms), but not after the last part
                 if i < len(parts) - 1:
                     await asyncio.sleep(random.uniform(0.1, 0.3))
