@@ -4,6 +4,7 @@ UI Actions - Core UI interaction tools for Android device control.
 
 import logging
 import os
+import random
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -460,8 +461,24 @@ class AdbTools(Tools):
             if index != -1:
                 await self.tap_by_index(index)
 
-            # Use PortalClient for text input (automatic TCP/content provider selection)
-            success = await self.portal.input_text(text, clear)
+            parts = text.split(" ")
+            parts = [part + " " for part in parts[:-1]] + [parts[-1]]
+            
+            # Type each part with random delays between them
+            for i, part in enumerate(parts):
+                if not part:  # Skip empty parts
+                    continue
+                    
+                # Clear only before typing the first part
+                should_clear = clear and i == 0
+                success = await self.portal.input_text(part, should_clear)
+                
+                if not success:
+                    return f"Error: Text input failed at part {i}"
+                
+                # Random delay between parts (100-300ms), but not after the last part
+                if i < len(parts) - 1:
+                    await asyncio.sleep(random.uniform(0.1, 0.3))
 
             if self._ctx:
                 input_event = InputTextActionEvent(
@@ -471,16 +488,12 @@ class AdbTools(Tools):
                 )
                 self._ctx.write_event_to_stream(input_event)
 
-            if success:
-                print(
-                    f"Text input completed (clear={clear}): {text[:50]}{'...' if len(text) > 50 else ''}"
-                )
-                return f"Text input completed (clear={clear}): {text[:50]}{'...' if len(text) > 50 else ''}"
-            else:
-                return "Error: Text input failed"
-
+            print(
+                f"Text input completed (clear={clear}): {text[:50]}{'...' if len(text) > 50 else ''}"
+            )
+            return f"Text input completed (clear={clear}): {text[:50]}{'...' if len(text) > 50 else ''}"
         except Exception as e:
-            return f"Error sending text input: {str(e)}"
+            return f"Error: Text input failed - {str(e)}"
 
     @Tools.ui_action
     async def back(self) -> str:

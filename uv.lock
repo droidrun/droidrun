@@ -361,12 +361,16 @@ wheels = [
 [[package]]
 name = "async-adbutils"
 version = "0.1.0"
-source = { git = "https://github.com/droidrun/async_adbutils.git#64699942ee8970ea047fbda811e4cd2d8d6075a0" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "apkutils2" },
     { name = "httpx" },
     { name = "pillow" },
     { name = "retry" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/94/e0/177151e2b4139f64a4674838771f437179f94db5302bd1a2177c8b1672f3/async_adbutils-0.1.0.tar.gz", hash = "sha256:f2fd9b6d0270902f96fe527db8bc5f0cc91a1c04be8aa06eb76327ccdf0dc299", size = 39806, upload-time = "2025-11-10T10:29:38.714Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/57/2a/e63977a7b911aba9001c165219f40f052223ce1ad2f6d3dc23cf9a07a427/async_adbutils-0.1.0-py3-none-any.whl", hash = "sha256:e10b6beed7622b9ac1450a11c4871844d3ad99b37074536a335fdfc613ef88b4", size = 37245, upload-time = "2025-11-10T10:29:37.731Z" },
 ]
 
 [[package]]
@@ -845,7 +849,7 @@ wheels = [
 
 [[package]]
 name = "droidrun"
-version = "0.4.4.dev0"
+version = "0.4.13"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
@@ -913,7 +917,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.67.0" },
     { name = "arize-phoenix", specifier = ">=12.3.0" },
-    { name = "async-adbutils", git = "https://github.com/droidrun/async_adbutils.git" },
+    { name = "async-adbutils" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.8.6" },
     { name = "black", marker = "extra == 'dev'", specifier = "==25.9.0" },
     { name = "droidrun", extras = ["google"], marker = "extra == 'dev'" },
@@ -3387,6 +3391,8 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/6b/fa/3234f913fe9a6525a7b97c6dad1f51e72b917e6872e051a5e2ffd8b16fbb/ruamel.yaml.clib-0.2.14-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:70eda7703b8126f5e52fcf276e6c0f40b0d314674f896fc58c47b0aef2b9ae83", size = 137970, upload-time = "2025-09-22T19:51:09.472Z" },
     { url = "https://files.pythonhosted.org/packages/ef/ec/4edbf17ac2c87fa0845dd366ef8d5852b96eb58fcd65fc1ecf5fe27b4641/ruamel.yaml.clib-0.2.14-cp314-cp314-musllinux_1_2_i686.whl", hash = "sha256:a0cb71ccc6ef9ce36eecb6272c81afdc2f565950cdcec33ae8e6cd8f7fc86f27", size = 739639, upload-time = "2025-09-22T19:51:10.566Z" },
     { url = "https://files.pythonhosted.org/packages/15/18/b0e1fafe59051de9e79cdd431863b03593ecfa8341c110affad7c8121efc/ruamel.yaml.clib-0.2.14-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:e7cb9ad1d525d40f7d87b6df7c0ff916a66bc52cb61b66ac1b2a16d0c1b07640", size = 764456, upload-time = "2025-09-22T19:51:11.736Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/cd/150fdb96b8fab27fe08d8a59fe67554568727981806e6bc2677a16081ec7/ruamel_yaml_clib-0.2.14-cp314-cp314-win32.whl", hash = "sha256:9b4104bf43ca0cd4e6f738cb86326a3b2f6eef00f417bd1e7efb7bdffe74c539", size = 102394, upload-time = "2025-11-14T21:57:36.703Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/e6/a3fa40084558c7e1dc9546385f22a93949c890a8b2e445b2ba43935f51da/ruamel_yaml_clib-0.2.14-cp314-cp314-win_amd64.whl", hash = "sha256:13997d7d354a9890ea1ec5937a219817464e5cc344805b37671562a401ca3008", size = 122673, upload-time = "2025-11-14T21:57:38.177Z" },
 ]
 
 [[package]]
