@@ -163,7 +163,30 @@ async def type(
     """
     if tools is None:
         raise ValueError("tools parameter is required")
-    return await tools.input_text(text, index, clear=clear)
+    
+    # Get stealth mode from tools_config in kwargs
+    tools_config = kwargs.get("tools_config")
+    stealth = tools_config.stealth if tools_config else False
+    
+    if not stealth:
+        return await tools.input_text(text, index, clear=clear)
+    
+    # Stealth mode: split by spaces and type each word separately with delay
+    words = text.split(' ')
+    results = []
+    
+    for i, word in enumerate(words):
+        # Clear only on first word if clear=True
+        should_clear = clear and i == 0
+        result = await tools.input_text(word, index, clear=should_clear)
+        results.append(result)
+        
+        # Add space after each word except the last one
+        if i < len(words) - 1:
+            await tools.input_text(' ', index, clear=False)
+            await asyncio.sleep(0.01)  # Small delay after space
+    
+    return f"Stealth typing completed: {len(words)} words typed"
 
 
 async def system_button(button: str, *, tools: "Tools" = None, **kwargs) -> str:

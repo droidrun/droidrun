@@ -66,6 +66,7 @@ class CodeActAgent(Workflow):
         output_model: Type[BaseModel] | None = None,
         prompt_resolver: Optional[PromptResolver] = None,
         tracing_config: TracingConfig | None = None,
+        tools_config=None,
         *args,
         **kwargs,
     ):
@@ -83,6 +84,7 @@ class CodeActAgent(Workflow):
         self.output_model = output_model
         self.prompt_resolver = prompt_resolver or PromptResolver()
         self.tracing_config = tracing_config
+        self.tools_config = tools_config
 
         self.chat_memory = None
         self.remembered_info = None
@@ -101,17 +103,17 @@ class CodeActAgent(Workflow):
             if inspect.iscoroutinefunction(func):
 
                 async def async_wrapper(
-                    *args, f=func, ti=tools_instance, ss=shared_state, **kwargs
+                    *args, f=func, ti=tools_instance, ss=shared_state, tc=tools_config, **kwargs
                 ):
-                    return await f(*args, tools=ti, shared_state=ss, **kwargs)
+                    return await f(*args, tools=ti, shared_state=ss, tools_config=tc, **kwargs)
 
                 self.tool_list[action_name] = async_wrapper
             else:
 
                 def sync_wrapper(
-                    *args, f=func, ti=tools_instance, ss=shared_state, **kwargs
+                    *args, f=func, ti=tools_instance, ss=shared_state, tc=tools_config, **kwargs
                 ):
-                    return f(*args, tools=ti, shared_state=ss, **kwargs)
+                    return f(*args, tools=ti, shared_state=ss, tools_config=tc, **kwargs)
 
                 self.tool_list[action_name] = sync_wrapper
 

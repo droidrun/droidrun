@@ -290,6 +290,7 @@ class DroidAgent(Workflow):
                 agent_config=self.config.agent,
                 custom_tools=self.custom_tools,
                 prompt_resolver=self.prompt_resolver,
+                tools_config=None,
                 timeout=self.timeout,
             )
         else:
@@ -377,6 +378,7 @@ class DroidAgent(Workflow):
                 prompt_resolver=self.prompt_resolver,
                 timeout=self.timeout,
                 tracing_config=self.config.tracing,
+                tools_config=self.config.tools,
             )
 
             handler = codeact_agent.run(
@@ -479,6 +481,7 @@ class DroidAgent(Workflow):
             if self.config.agent.reasoning:
                 self.manager_agent.tools_instance = self.tools_instance
                 self.executor_agent.tools_instance = self.tools_instance
+                self.executor_agent.tools_config = tools_config_resolved
 
         self.tools_instance._set_context(ctx)
 

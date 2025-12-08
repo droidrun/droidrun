@@ -67,6 +67,7 @@ class ExecutorAgent(Workflow):
         agent_config: AgentConfig,
         custom_tools: dict = None,
         prompt_resolver: Optional[PromptResolver] = None,
+        tools_config=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -77,6 +78,7 @@ class ExecutorAgent(Workflow):
         self.tools_instance = tools_instance
         self.shared_state = shared_state
         self.prompt_resolver = prompt_resolver or PromptResolver()
+        self.tools_config = tools_config
 
         self.custom_tools = custom_tools if custom_tools is not None else {}
 
@@ -359,7 +361,7 @@ class ExecutorAgent(Workflow):
                         "Failed: type requires text",
                     )
 
-                result = await type(text, index, tools=self.tools_instance)
+                result = await type(text, index, tools=self.tools_instance, tools_config=self.tools_config)
                 return True, "None", f"Typed '{text}' into element at index {index}"
 
             elif action_type == "system_button":
