@@ -177,7 +177,7 @@ class ToolsConfig:
     """Tools configuration."""
 
     allow_drag: bool = False
-    stealth: bool = False
+    randomize: bool = False
 
 
 @dataclass

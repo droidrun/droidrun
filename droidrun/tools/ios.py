@@ -3,6 +3,7 @@ UI Actions - Core UI interaction tools for iOS device control.
 """
 
 import logging
+import random
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,12 +40,13 @@ SYSTEM_BUNDLE_IDENTIFIERS = [
 class IOSTools(Tools):
     """Core UI interaction tools for iOS device control."""
 
-    def __init__(self, url: str, bundle_identifiers: List[str] | None = None) -> None:
+    def __init__(self, url: str, bundle_identifiers: List[str] | None = None, tools_config=None) -> None:
         """Initialize the IOSTools instance.
 
         Args:
             url: iOS device URL. This is the URL of the iOS device. It is used to send requests to the iOS device.
             bundle_identifiers: List of bundle identifiers to include in the list of packages
+            tools_config: ToolsConfig instance for tool behavior configuration (optional)
         """
 
         self.clickable_elements_cache: List[Dict[str, Any]] = []
@@ -59,6 +61,7 @@ class IOSTools(Tools):
             None  # Store last tapped element's rect for text input
         )
         self.bundle_identifiers = bundle_identifiers or []
+        self.tools_config = tools_config
         logger.info(f"iOS device URL: {url}")
 
     def get_state(self) -> List[Dict[str, Any]]:
@@ -266,8 +269,37 @@ class IOSTools(Tools):
                 element_class = element.get("className", "Unknown class")
                 return f"Error: Element with index {index} ('{element_text}', {element_class}) has no coordinates and cannot be tapped"
 
-            # Format rect in iOS format: {{x,y},{w,h}}
-            ios_rect = f"{{{{{x},{y}}},{{{width},{height}}}}}"
+            # Calculate center coordinates
+            center_x = x + width / 2
+            center_y = y + height / 2
+
+            # Add randomization only if randomize mode is enabled
+            if self.tools_config and self.tools_config.randomize:
+                # Randomize within 40% of the element's width/height from center
+                max_x_offset = int((width / 2) * 0.4)
+                max_y_offset = int((height / 2) * 0.4)
+
+                # Apply random offset while ensuring we stay within bounds
+                x_offset = (
+                    random.randint(-max_x_offset, max_x_offset) if max_x_offset > 0 else 0
+                )
+                y_offset = (
+                    random.randint(-max_y_offset, max_y_offset) if max_y_offset > 0 else 0
+                )
+
+                tap_x = center_x + x_offset
+                tap_y = center_y + y_offset
+
+                # Ensure coordinates stay within element bounds (safety check)
+                tap_x = max(x, min(x + width, tap_x))
+                tap_y = max(y, min(y + height, tap_y))
+            else:
+                # Use center coordinates when randomize is not enabled
+                tap_x = center_x
+                tap_y = center_y
+
+            # Format rect in iOS format: {{x,y},{w,h}} using the tap coordinates
+            ios_rect = f"{{{{{tap_x},{tap_y}}},{{{1},{1}}}}}"
 
             # Store the rect for potential text input (keep in simple format for text input)
             self.last_tapped_rect = f"{x},{y},{width},{height}"

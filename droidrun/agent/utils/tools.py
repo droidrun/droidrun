@@ -9,7 +9,7 @@ from droidrun.agent.oneflows.app_starter_workflow import AppStarter
 
 
 async def create_tools_from_config(
-    device_config: "DeviceConfig", vision_enabled: bool = True
+    device_config: "DeviceConfig", vision_enabled: bool = True, tools_config: "ToolsConfig | None" = None
 ) -> "Tools":
     """
     Create Tools instance from DeviceConfig.
@@ -17,6 +17,7 @@ async def create_tools_from_config(
     Args:
         device_config: Device configuration
         vision_enabled: Whether vision is enabled (for filter selection)
+        tools_config: Tools configuration for behavior control (optional)
 
     Returns:
         AdbTools or IOSTools based on config
@@ -37,7 +38,7 @@ async def create_tools_from_config(
             if not devices:
                 raise ValueError("No connected Android devices found.")
             device_serial = devices[0].serial
-        return AdbTools(serial=device_serial, vision_enabled=vision_enabled)
+        return AdbTools(serial=device_serial, vision_enabled=vision_enabled, tools_config=tools_config)
     else:
         # iOS: require explicit device URL
         if device_serial is None:
@@ -95,20 +96,24 @@ async def resolve_tools_instance(
     # Case 2: ToolsConfig provided
     elif tools is not None and isinstance(tools, ToolsConfig):
         tools_instance = await create_tools_from_config(
-            device_config, vision_enabled=vision_enabled
+            device_config, vision_enabled=vision_enabled, tools_config=tools
         )
         tools_cfg = tools
 
     # Case 3: None provided
     else:
-        tools_instance = await create_tools_from_config(
-            device_config, vision_enabled=vision_enabled
-        )
         tools_cfg = tools_config_fallback if tools_config_fallback else ToolsConfig()
+        tools_instance = await create_tools_from_config(
+            device_config, vision_enabled=vision_enabled, tools_config=tools_cfg
+        )
 
     # Attach credential manager if provided
     if credential_manager:
         tools_instance.credential_manager = credential_manager
+
+    # Ensure tools_config is set on Tools instance (for Case 1 where tools provided directly)
+    if not hasattr(tools_instance, 'tools_config') or tools_instance.tools_config is None:
+        tools_instance.tools_config = tools_cfg
 
     return tools_instance, tools_cfg
 
@@ -164,14 +169,14 @@ async def type(
     if tools is None:
         raise ValueError("tools parameter is required")
     
-    # Get stealth mode from tools_config in kwargs
+    # Get randomize mode from tools_config in kwargs
     tools_config = kwargs.get("tools_config")
-    stealth = tools_config.stealth if tools_config else False
+    randomize = tools_config.randomize if tools_config else False
     
-    if not stealth:
+    if not randomize:
         return await tools.input_text(text, index, clear=clear)
     
-    # Stealth mode: split by spaces and type each word separately with delay
+    # randomize mode: split by spaces and type each word separately with delay
     words = text.split(' ')
     results = []
     
@@ -186,7 +191,7 @@ async def type(
             await tools.input_text(' ', index, clear=False)
             await asyncio.sleep(0.01)  # Small delay after space
     
-    return f"Stealth typing completed: {len(words)} words typed"
+    return f"randomize typing completed: {len(words)} words typed"
 
 
 async def system_button(button: str, *, tools: "Tools" = None, **kwargs) -> str:

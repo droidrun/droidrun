@@ -225,8 +225,8 @@ safe_execution:
 tools:
   # Enable drag tool
   allow_drag: false # this does nothing now place holder for now
-  # Enable stealth typing (types each word separately with delays for more human-like behavior)
-  stealth: false
+  # Enable randomize typing (types each word separately with delays for more human-like behavior)
+  randomize: false
 
 # === Credential Settings ===
 credentials:

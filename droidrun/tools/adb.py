@@ -6,6 +6,7 @@ import logging
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
+import random
 
 from llama_index.core.workflow import Context
 from droidrun.agent.common.events import (
@@ -42,6 +43,7 @@ class AdbTools(Tools):
         tree_filter: TreeFilter = None,
         tree_formatter: TreeFormatter = None,
         vision_enabled: bool = True,
+        tools_config=None,
     ) -> None:
         """Initialize the AdbTools instance.
 
@@ -55,6 +57,7 @@ class AdbTools(Tools):
             tree_filter: Filter for accessibility tree (default: None, uses logic based on vision_enabled)
             tree_formatter: Formatter for filtered tree (default: IndexedFormatter)
             vision_enabled: Whether vision is enabled (default: True). Used to select default filter.
+            tools_config: ToolsConfig instance for tool behavior configuration (optional)
         """
         self._serial = serial
         self._use_tcp = use_tcp
@@ -79,6 +82,9 @@ class AdbTools(Tools):
 
         # Credential manager for secret handling
         self.credential_manager = credential_manager
+
+        # Tools configuration for behavior control
+        self.tools_config = tools_config
 
         if tree_filter:
             self.tree_filter = tree_filter
@@ -131,6 +137,7 @@ class AdbTools(Tools):
     def _set_context(self, ctx: Context):
         self._ctx = ctx
 
+    
     def _extract_element_coordinates_by_index(self, index: int) -> Tuple[int, int]:
         """
         Extract center coordinates from an element by its index.
@@ -204,8 +211,37 @@ class AdbTools(Tools):
             ) from e
 
         # Calculate the center of the element
-        x = (left + right) // 2
-        y = (top + bottom) // 2
+        center_x = (left + right) // 2
+        center_y = (top + bottom) // 2
+
+        # Add randomization only if randomize mode is enabled
+        if self.tools_config and self.tools_config.randomize:
+            # Randomize within 40% of the element's width/height from center
+            width = right - left
+            height = bottom - top
+
+            # Calculate random offsets (within 40% of half-width/half-height)
+            max_x_offset = int((width / 2) * 0.4)
+            max_y_offset = int((height / 2) * 0.4)
+
+            # Apply random offset while ensuring we stay within bounds
+            x_offset = (
+                random.randint(-max_x_offset, max_x_offset) if max_x_offset > 0 else 0
+            )
+            y_offset = (
+                random.randint(-max_y_offset, max_y_offset) if max_y_offset > 0 else 0
+            )
+
+            x = center_x + x_offset
+            y = center_y + y_offset
+
+            # Ensure coordinates stay within element bounds (safety check)
+            x = max(left, min(right, x))
+            y = max(top, min(bottom, y))
+        else:
+            # Use center coordinates when randomize is not enabled
+            x = center_x
+            y = center_y
 
         return x, y
 
