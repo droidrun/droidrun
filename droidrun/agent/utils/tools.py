@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import TYPE_CHECKING, List
 
 if TYPE_CHECKING:
@@ -6,10 +7,13 @@ if TYPE_CHECKING:
     from droidrun.tools import Tools
 
 from droidrun.agent.oneflows.app_starter_workflow import AppStarter
+from droidrun.agent.utils.swipe_curve import generate_curved_path
 
 
 async def create_tools_from_config(
-    device_config: "DeviceConfig", vision_enabled: bool = True, tools_config: "ToolsConfig | None" = None
+    device_config: "DeviceConfig",
+    vision_enabled: bool = True,
+    tools_config: "ToolsConfig | None" = None,
 ) -> "Tools":
     """
     Create Tools instance from DeviceConfig.
@@ -38,7 +42,11 @@ async def create_tools_from_config(
             if not devices:
                 raise ValueError("No connected Android devices found.")
             device_serial = devices[0].serial
-        return AdbTools(serial=device_serial, vision_enabled=vision_enabled, tools_config=tools_config)
+        return AdbTools(
+            serial=device_serial,
+            vision_enabled=vision_enabled,
+            tools_config=tools_config,
+        )
     else:
         # iOS: require explicit device URL
         if device_serial is None:
@@ -112,7 +120,10 @@ async def resolve_tools_instance(
         tools_instance.credential_manager = credential_manager
 
     # Ensure tools_config is set on Tools instance (for Case 1 where tools provided directly)
-    if not hasattr(tools_instance, 'tools_config') or tools_instance.tools_config is None:
+    if (
+        not hasattr(tools_instance, "tools_config")
+        or tools_instance.tools_config is None
+    ):
         tools_instance.tools_config = tools_cfg
 
     return tools_instance, tools_cfg
@@ -168,29 +179,32 @@ async def type(
     """
     if tools is None:
         raise ValueError("tools parameter is required")
-    
-    # Get randomize mode from tools_config in kwargs
-    tools_config = kwargs.get("tools_config")
-    randomize = tools_config.randomize if tools_config else False
-    
+
+    # Get randomize mode from tools_config
+    randomize = (
+        tools.tools_config.randomize
+        if hasattr(tools, "tools_config") and tools.tools_config
+        else False
+    )
+
     if not randomize:
         return await tools.input_text(text, index, clear=clear)
-    
+
     # randomize mode: split by spaces and type each word separately with delay
-    words = text.split(' ')
+    words = text.split(" ")
     results = []
-    
+
     for i, word in enumerate(words):
         # Clear only on first word if clear=True
         should_clear = clear and i == 0
         result = await tools.input_text(word, index, clear=should_clear)
         results.append(result)
-        
+
         # Add space after each word except the last one
         if i < len(words) - 1:
-            await tools.input_text(' ', index, clear=False)
+            await tools.input_text(" ", index, clear=False)
             await asyncio.sleep(0.01)  # Small delay after space
-    
+
     return f"randomize typing completed: {len(words)} words typed"
 
 
@@ -261,6 +275,47 @@ async def swipe(
     # Convert seconds to milliseconds
     duration_ms = int(duration * 1000)
 
+    # Get randomize mode from tools_config
+    randomize = (
+        tools.tools_config.randomize
+        if hasattr(tools, "tools_config") and tools.tools_config
+        else False
+    )
+
+    # Use curved path for AdbTools when randomize is enabled
+    if randomize:
+        from droidrun.tools import AdbTools
+
+        if isinstance(tools, AdbTools):
+            try:
+                # Generate curved path
+                path_points = generate_curved_path(start_x, start_y, end_x, end_y)
+
+                # Start touch at first point
+                x0, y0 = path_points[0]
+                await tools.device.shell(f"input motionevent DOWN {x0} {y0}")
+
+                # Calculate delay between points
+                delay_between_points = duration_ms / 1000 / len(path_points)
+
+                # Move through intermediate points
+                for x, y in path_points[1:]:
+                    await asyncio.sleep(delay_between_points)
+                    await tools.device.shell(f"input motionevent MOVE {x} {y}")
+
+                # End touch at last point
+                x_end, y_end = path_points[-1]
+                await tools.device.shell(f"input motionevent UP {x_end} {y_end}")
+
+                await asyncio.sleep(duration_ms / 1000)
+                return True
+            except Exception:
+                # Fallback to simple swipe on error
+                return await tools.swipe(
+                    start_x, start_y, end_x, end_y, duration_ms=int(duration_ms)
+                )
+
+    # Standard swipe (for iOS or when randomize is disabled)
     return await tools.swipe(start_x, start_y, end_x, end_y, duration_ms=duration_ms)
 
 
