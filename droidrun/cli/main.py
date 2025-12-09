@@ -54,7 +54,9 @@ def ensure_package_config(verbose: bool = True):
         example_path = PathResolver.get_project_root() / "config_example.yaml"
         shutil.copy2(example_path, package_config_path)
         if verbose:
-            console.print(f"[blue]Created config.yaml in package at: {package_config_path}[/]")
+            console.print(
+                f"[blue]Created config.yaml in package at: {package_config_path}[/]"
+            )
     else:
         if verbose:
             console.print(f"[blue]Using config from package: {package_config_path}[/]")
