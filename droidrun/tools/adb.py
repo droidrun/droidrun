@@ -137,7 +137,6 @@ class AdbTools(Tools):
     def _set_context(self, ctx: Context):
         self._ctx = ctx
 
-    
     def _extract_element_coordinates_by_index(self, index: int) -> Tuple[int, int]:
         """
         Extract center coordinates from an element by its index.

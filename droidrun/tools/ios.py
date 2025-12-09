@@ -40,7 +40,9 @@ SYSTEM_BUNDLE_IDENTIFIERS = [
 class IOSTools(Tools):
     """Core UI interaction tools for iOS device control."""
 
-    def __init__(self, url: str, bundle_identifiers: List[str] | None = None, tools_config=None) -> None:
+    def __init__(
+        self, url: str, bundle_identifiers: List[str] | None = None, tools_config=None
+    ) -> None:
         """Initialize the IOSTools instance.
 
         Args:
@@ -281,10 +283,14 @@ class IOSTools(Tools):
 
                 # Apply random offset while ensuring we stay within bounds
                 x_offset = (
-                    random.randint(-max_x_offset, max_x_offset) if max_x_offset > 0 else 0
+                    random.randint(-max_x_offset, max_x_offset)
+                    if max_x_offset > 0
+                    else 0
                 )
                 y_offset = (
-                    random.randint(-max_y_offset, max_y_offset) if max_y_offset > 0 else 0
+                    random.randint(-max_y_offset, max_y_offset)
+                    if max_y_offset > 0
+                    else 0
                 )
 
                 tap_x = center_x + x_offset
