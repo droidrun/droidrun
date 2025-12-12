@@ -7,8 +7,7 @@ to mimic natural human behavior on Android devices.
 
 import asyncio
 import random
-import time
-from typing import Any, Dict, List, Tuple
+from typing import List, Tuple
 
 from droidrun.tools.adb import AdbTools
 
@@ -151,7 +150,7 @@ class StealthAdbTools(AdbTools):
         try:
             left, top, right, bottom = map(int, bounds_str.split(","))
         except ValueError as e:
-            raise ValueError(f"Invalid bounds format '{bounds_str}': {e}")
+            raise ValueError(f"Invalid bounds format '{bounds_str}': {e}") from e
 
         # Calculate the center of the element
         center_x = (left + right) // 2
@@ -235,67 +234,29 @@ class StealthAdbTools(AdbTools):
         Returns:
             True if successful, False otherwise
         """
-        from async_adbutils import adb
-
         await self._ensure_connected()
 
-        # Generate curved path
-        path_points = generate_curved_path(start_x, start_y, end_x, end_y)
-
-        # Convert milliseconds to seconds for sleep
-        duration_sec = duration_ms / 1000.0
-
-        # Calculate delay between points
-        if len(path_points) > 1:
-            delay_per_point = duration_sec / (len(path_points) - 1)
-        else:
-            delay_per_point = 0
-
-        # Build swipe command with curved path
-        swipe_events = []
-
-        # DOWN event at start
-        start_time = time.time()
-        swipe_events.append(f"sendevent /dev/input/event4 3 57 0")  # Tracking ID
-        swipe_events.append(
-            f"sendevent /dev/input/event4 3 53 {path_points[0][0]}"
-        )  # X
-        swipe_events.append(
-            f"sendevent /dev/input/event4 3 54 {path_points[0][1]}"
-        )  # Y
-        swipe_events.append(f"sendevent /dev/input/event4 1 330 1")  # Touch down
-        swipe_events.append(f"sendevent /dev/input/event4 0 0 0")  # Sync
-
-        # MOVE events along the curve
-        for i, (x, y) in enumerate(path_points[1:-1], 1):
-            # Add small delay between points
-            if delay_per_point > 0:
-                await asyncio.sleep(delay_per_point)
-
-            swipe_events.append(f"sendevent /dev/input/event4 3 53 {x}")  # X
-            swipe_events.append(f"sendevent /dev/input/event4 3 54 {y}")  # Y
-            swipe_events.append(f"sendevent /dev/input/event4 0 0 0")  # Sync
-
-        # Final MOVE to end point
-        if len(path_points) > 1:
-            await asyncio.sleep(delay_per_point)
-            swipe_events.append(
-                f"sendevent /dev/input/event4 3 53 {path_points[-1][0]}"
-            )
-            swipe_events.append(
-                f"sendevent /dev/input/event4 3 54 {path_points[-1][1]}"
-            )
-            swipe_events.append(f"sendevent /dev/input/event4 0 0 0")
-
-        # UP event
-        swipe_events.append(f"sendevent /dev/input/event4 1 330 0")  # Touch up
-        swipe_events.append(f"sendevent /dev/input/event4 3 57 -1")  # End tracking
-        swipe_events.append(f"sendevent /dev/input/event4 0 0 0")  # Sync
-
-        # Execute all events
-        swipe_cmd = "; ".join(swipe_events)
         try:
-            await self.device.shell(swipe_cmd)
+            # Generate curved path
+            path_points = generate_curved_path(start_x, start_y, end_x, end_y)
+
+            # Start touch at first point
+            x0, y0 = path_points[0]
+            await self.device.shell(f"input motionevent DOWN {x0} {y0}")
+
+            # Calculate delay between points
+            delay_between_points = duration_ms / 1000 / len(path_points)
+
+            # Move through intermediate points
+            for x, y in path_points[1:]:
+                await asyncio.sleep(delay_between_points)
+                await self.device.shell(f"input motionevent MOVE {x} {y}")
+
+            # End touch at last point
+            x_end, y_end = path_points[-1]
+            await self.device.shell(f"input motionevent UP {x_end} {y_end}")
+
+            await asyncio.sleep(duration_ms / 1000)
             return True
-        except Exception as e:
+        except Exception:
             return False
