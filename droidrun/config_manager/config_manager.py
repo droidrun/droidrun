@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -176,8 +175,7 @@ class LoggingConfig:
 class ToolsConfig:
     """Tools configuration."""
 
-    allow_drag: bool = False
-    randomize: bool = False
+    disabled_tools: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -185,7 +183,7 @@ class CredentialsConfig:
     """Credentials configuration."""
 
     enabled: bool = False
-    file_path: str = "credentials.yaml"
+    file_path: str = "config/credentials.yaml"
 
 
 @dataclass
@@ -335,96 +333,20 @@ class DroidrunConfig:
         )
 
     @classmethod
-    def from_yaml(
-        cls,
-        path: str,
-        use_path_resolver: bool = True,
-        create_if_missing: bool = False,
-    ) -> "DroidrunConfig":
+    def from_yaml(cls, path: str) -> "DroidrunConfig":
         """
-        Create config from YAML file.
+        Load config from YAML file.
 
         Args:
-            path: Path to YAML config file (relative or absolute).
-                 If use_path_resolver=True (default), PathResolver will check:
-                 - Absolute paths: used as-is
-                 - Relative paths: checks working dir first, then package dir
-            use_path_resolver: If True (default), resolve path using PathResolver.
-                              If False, use path as-is.
-            create_if_missing: If True, create config file from defaults if not found.
-                              If False (default), raise FileNotFoundError.
+            path: Path to config file (relative to CWD or absolute)
 
         Returns:
             DroidrunConfig instance
 
         Raises:
-            FileNotFoundError: If the YAML file doesn't exist and create_if_missing=False
-
-        Example:
-            >>> config = DroidrunConfig.from_yaml("config.yaml")
-            >>> config = DroidrunConfig.from_yaml("/absolute/path/config.yaml")
-            >>> config = DroidrunConfig.from_yaml("config.yaml", create_if_missing=True)
+            FileNotFoundError: If file doesn't exist
+            Exception: If file can't be parsed
         """
-        import logging
-
-        logger = logging.getLogger("droidrun")
-
-        # Resolve path if enabled
-        if use_path_resolver:
-            try:
-                resolved_path = PathResolver.resolve(path, must_exist=True)
-                final_path = str(resolved_path)
-            except FileNotFoundError:
-                if create_if_missing:
-                    # File doesn't exist, create it from defaults
-                    resolved_path = PathResolver.resolve(path, create_if_missing=True)
-                    final_path = str(resolved_path)
-
-                    # Ensure parent directory exists
-                    os.makedirs(os.path.dirname(final_path) or ".", exist_ok=True)
-
-                    # Create default config
-                    default_config = cls()
-                    with open(final_path, "w", encoding="utf-8") as f:
-                        yaml.dump(
-                            default_config.to_dict(),
-                            f,
-                            sort_keys=False,
-                            default_flow_style=False,
-                        )
-                    logger.info(f"Created default config at: {final_path}")
-                    return default_config
-                else:
-                    raise
-        else:
-            final_path = path
-            if not os.path.exists(final_path):
-                if create_if_missing:
-                    # Create default config
-                    os.makedirs(os.path.dirname(final_path) or ".", exist_ok=True)
-                    default_config = cls()
-                    with open(final_path, "w", encoding="utf-8") as f:
-                        yaml.dump(
-                            default_config.to_dict(),
-                            f,
-                            sort_keys=False,
-                            default_flow_style=False,
-                        )
-                    logger.info(f"Created default config at: {final_path}")
-                    return default_config
-                else:
-                    raise FileNotFoundError(f"Config file not found: {final_path}")
-
-        with open(final_path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
-            if data:
-                try:
-                    return cls.from_dict(data)
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to parse config from {final_path}, using defaults: {e}"
-                    )
-                    return cls()
-            else:
-                logger.warning(f"Empty config file at {final_path}, using defaults")
-                return cls()
+        return cls.from_dict(data)

@@ -32,7 +32,6 @@ from droidrun.portal import (
     ping_portal_tcp,
 )
 from droidrun.telemetry import print_telemetry_message
-from droidrun.config_manager.path_resolver import PathResolver
 from droidrun.agent.utils.llm_picker import load_llm
 import json
 
@@ -42,24 +41,6 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 console = Console()
-
-
-def ensure_package_config(verbose: bool = True):
-    """Ensure config.yaml exists in package dir."""
-    package_config_path = PathResolver.get_project_root() / "config.yaml"
-    if not package_config_path.exists():
-        # Config not found, copy config_example.yaml to package dir
-        import shutil
-
-        example_path = PathResolver.get_project_root() / "config_example.yaml"
-        shutil.copy2(example_path, package_config_path)
-        if verbose:
-            console.print(
-                f"[blue]Created config.yaml in package at: {package_config_path}[/]"
-            )
-    else:
-        if verbose:
-            console.print(f"[blue]Using config from package: {package_config_path}[/]")
 
 
 def configure_logging(goal: str, debug: bool, rich_text: bool = True):
@@ -124,7 +105,6 @@ async def run_command(
     tcp: bool | None = None,
     save_trajectory: str | None = None,
     ios: bool = False,
-    allow_drag: bool | None = None,
     temperature: float | None = None,
     **kwargs,
 ) -> bool:
@@ -133,11 +113,11 @@ async def run_command(
     Returns:
         bool: True if the task completed successfully, False otherwise.
     """
-    ensure_package_config(verbose=False)
-
-    # Load config and apply CLI overrides via direct mutation
-    config_path = config_path or "config.yaml"
-    config = DroidrunConfig.from_yaml(config_path)
+    # Load config: use provided file or defaults
+    if config_path:
+        config = DroidrunConfig.from_yaml(config_path)
+    else:
+        config = DroidrunConfig()
 
     # Print cloud link in a box
     if config.logging.rich_text:
@@ -165,6 +145,10 @@ async def run_command(
     with log_handler.render():
         try:
             logger.info(f"🚀 Starting: {command}")
+            if config_path:
+                logger.info(f"📄 Config: {config_path}")
+            else:
+                logger.info("📄 Config: defaults")
 
             print_telemetry_message()
 
@@ -199,10 +183,6 @@ async def run_command(
                 config.device.serial = device
             if tcp is not None:
                 config.device.use_tcp = tcp
-
-            # Tools overrides
-            if allow_drag is not None:
-                config.tools.allow_drag = allow_drag
 
             # Logging overrides
             if debug is not None:
@@ -396,7 +376,6 @@ def _print_version(ctx, param, value):
 )
 def cli():
     """DroidRun - Control your Android device through LLM agents."""
-    ensure_package_config(verbose=True)
     pass
 
 
@@ -707,6 +686,7 @@ cli.add_command(macro_cli, name="macro")
 
 async def test(
     command: str,
+    config_path: str | None = None,
     device: str | None = None,
     steps: int | None = None,
     vision: bool | None = None,
@@ -715,11 +695,14 @@ async def test(
     debug: bool | None = None,
     use_tcp: bool | None = None,
     save_trajectory: str | None = None,
-    allow_drag: bool | None = None,
     temperature: float | None = None,
     ios: bool = False,
 ):
-    config = DroidrunConfig.from_yaml("config.yaml")
+    # Load config: use provided file or defaults
+    if config_path:
+        config = DroidrunConfig.from_yaml(config_path)
+    else:
+        config = DroidrunConfig()
 
     # Initialize logging first (use config default if debug not specified)
     debug_mode = debug if debug is not None else config.logging.debug
@@ -731,6 +714,10 @@ async def test(
     with log_handler.render():
         try:
             logger.info(f"🚀 Starting: {command}")
+            if config_path:
+                logger.info(f"📄 Config: {config_path}")
+            else:
+                logger.info("📄 Config: defaults")
 
             print_telemetry_message()
 
@@ -757,10 +744,6 @@ async def test(
                 config.device.serial = device
             if use_tcp is not None:
                 config.device.use_tcp = use_tcp
-
-            # Tools overrides
-            if allow_drag is not None:
-                config.tools.allow_drag = allow_drag
 
             # Logging overrides
             if debug is not None:
@@ -867,5 +850,4 @@ if __name__ == "__main__":
     api_base = None
     ios = False
     save_trajectory = "none"
-    allow_drag = False
     asyncio.run(run_command(command, device="emulator-5556", reasoning=False))
