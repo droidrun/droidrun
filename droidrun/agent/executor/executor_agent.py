@@ -352,7 +352,7 @@ class ExecutorAgent(Workflow):
             elif action_type == "type":
                 text = action_dict.get("text")
                 index = action_dict.get("index", -1)
-
+                clear = action_dict.get("clear", False)
                 if text is None:
                     return (
                         False,
@@ -360,7 +360,7 @@ class ExecutorAgent(Workflow):
                         "Failed: type requires text",
                     )
 
-                result = await type(text, index, tools=self.tools_instance)
+                result = await type(text, index, clear=clear, tools=self.tools_instance)
                 return True, "None", f"Typed '{text}' into element at index {index}"
 
             elif action_type == "system_button":
