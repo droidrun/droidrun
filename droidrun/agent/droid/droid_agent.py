@@ -978,15 +978,22 @@ class DroidAgent(Workflow):
                 try:
                     from droidrun.agent.trajectory.gcp_upload import upload_trajectory_to_gcp
 
+                    # Delete local files after upload unless keep_local is True
+                    cleanup_local = not self.config.logging.gcp.keep_local
+
                     gcp_result = upload_trajectory_to_gcp(
                         trajectory_folder=str(self.trajectory.trajectory_folder),
                         bucket_name=self.config.logging.gcp.bucket_name,
                         product_id=self.config.logging.gcp.product_id,
                         test_run_id=self.config.logging.gcp.test_run_id,
                         tcue_id=self.config.logging.gcp.tcue_id,
+                        cleanup_local=cleanup_local,
                     )
                     if gcp_result["success"]:
-                        logger.info(f"☁️  Uploaded to GCP: {gcp_result['gcp_base_path']}")
+                        if gcp_result["local_deleted"]:
+                            logger.info(f"☁️  Uploaded to GCP: {gcp_result['gcp_base_path']} (local deleted)")
+                        else:
+                            logger.info(f"☁️  Uploaded to GCP: {gcp_result['gcp_base_path']}")
                     else:
                         logger.warning(
                             f"⚠️  GCP upload partial: {len(gcp_result['errors'])} errors"

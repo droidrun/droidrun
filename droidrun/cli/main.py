@@ -111,6 +111,7 @@ async def run_command(
     test_run_id: str | None = None,
     tcue_id: str | None = None,
     gcp_bucket: str | None = None,
+    keep_local: bool = False,
     **kwargs,
 ) -> bool:
     """Run a command on your Android device using natural language.
@@ -203,6 +204,7 @@ async def run_command(
                 config.logging.gcp.product_id = product_id
                 config.logging.gcp.test_run_id = test_run_id
                 config.logging.gcp.tcue_id = tcue_id
+                config.logging.gcp.keep_local = keep_local
                 if gcp_bucket:
                     config.logging.gcp.bucket_name = gcp_bucket
                 else:
@@ -213,6 +215,7 @@ async def run_command(
                 logger.debug(
                     f"CLI override: GCP logging enabled -> "
                     f"{config.logging.gcp.bucket_name}/{product_id}/{test_run_id}/{tcue_id}"
+                    f" (keep_local={keep_local})"
                 )
 
             # Tracing overrides
@@ -482,6 +485,12 @@ def cli():
     help="GCP bucket name for trajectory uploads (default: nova_assets)",
     default=None,
 )
+@click.option(
+    "--keep-local",
+    is_flag=True,
+    default=False,
+    help="Keep local trajectory files after GCP upload (for debugging)",
+)
 @coro
 async def run(
     command: str,
@@ -505,6 +514,7 @@ async def run(
     test_run_id: str | None,
     tcue_id: str | None,
     gcp_bucket: str | None,
+    keep_local: bool,
 ):
     """Run a command on your Android device using natural language."""
 
@@ -531,6 +541,7 @@ async def run(
             test_run_id=test_run_id,
             tcue_id=tcue_id,
             gcp_bucket=gcp_bucket,
+            keep_local=keep_local,
         )
     finally:
         # Disable DroidRun keyboard after execution

@@ -7,6 +7,7 @@ following Nova's logging pattern with path structure: bucket/product_id/test_run
 
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -139,6 +140,7 @@ def upload_trajectory_to_gcp(
     product_id: str,
     test_run_id: str,
     tcue_id: str,
+    cleanup_local: bool = True,
 ) -> dict:
     """
     Upload a trajectory folder to GCP with Nova-style path structure.
@@ -158,6 +160,7 @@ def upload_trajectory_to_gcp(
         product_id: Product identifier
         test_run_id: Test run identifier
         tcue_id: Test case under execution identifier
+        cleanup_local: If True, delete local trajectory folder after successful upload
 
     Returns:
         Dictionary with upload results:
@@ -165,7 +168,8 @@ def upload_trajectory_to_gcp(
             "success": bool,
             "gcp_base_path": str,
             "uploaded_files": list,
-            "errors": list
+            "errors": list,
+            "local_deleted": bool
         }
     """
     result = {
@@ -173,6 +177,7 @@ def upload_trajectory_to_gcp(
         "gcp_base_path": "",
         "uploaded_files": [],
         "errors": [],
+        "local_deleted": False,
     }
 
     try:
@@ -248,6 +253,15 @@ def upload_trajectory_to_gcp(
                 f"✅ Uploaded trajectory to {result['gcp_base_path']} "
                 f"({len(result['uploaded_files'])} files)"
             )
+
+            # Delete local trajectory folder after successful upload
+            if cleanup_local:
+                try:
+                    shutil.rmtree(folder_path)
+                    result["local_deleted"] = True
+                    logger.debug(f"🗑️ Deleted local trajectory folder: {trajectory_folder}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to delete local trajectory folder: {e}")
         else:
             logger.warning(
                 f"⚠️ Partial upload to {result['gcp_base_path']}: "

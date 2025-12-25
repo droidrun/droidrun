@@ -171,6 +171,7 @@ class GCPLoggingConfig:
     product_id: str = ""
     test_run_id: str = ""
     tcue_id: str = ""
+    keep_local: bool = False  # If False, delete local files after GCP upload
 
 
 @dataclass
