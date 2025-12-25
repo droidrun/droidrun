@@ -209,9 +209,9 @@ async def run_command(
                     config.logging.gcp.bucket_name = gcp_bucket
                 else:
                     config.logging.gcp.bucket_name = "nova_assets"  # Default bucket
-                # Auto-enable trajectory saving for GCP upload
+                # Auto-enable trajectory saving for GCP upload (use "step" for full logging)
                 if config.logging.save_trajectory == "none":
-                    config.logging.save_trajectory = "action"
+                    config.logging.save_trajectory = "step"
                 logger.debug(
                     f"CLI override: GCP logging enabled -> "
                     f"{config.logging.gcp.bucket_name}/{product_id}/{test_run_id}/{tcue_id}"
