@@ -23,13 +23,10 @@ from droidrun import ResultEvent, DroidAgent
 from droidrun.cli.logs import LogHandler
 from droidrun.config_manager import DroidrunConfig
 from droidrun.macro.cli import macro_cli
-from droidrun import __version__
 from droidrun.portal import (
     PORTAL_PACKAGE_NAME,
     download_portal_apk,
-    download_versioned_portal_apk,
     enable_portal_accessibility,
-    get_compatible_portal_version,
     ping_portal,
     ping_portal_content,
     ping_portal_tcp,
@@ -83,8 +80,7 @@ async def get_portal_version(device_obj) -> str | None:
             version_data = json.loads(json_str)
 
             if version_data.get("status") == "success":
-                # Check for 'result' first (new portal), then 'data' (legacy)
-                return version_data.get("result") or version_data.get("data")
+                return version_data.get("data")
         return None
     except Exception:
         return None
@@ -111,6 +107,10 @@ async def run_command(
     save_trajectory: str | None = None,
     ios: bool = False,
     temperature: float | None = None,
+    product_id: str | None = None,
+    test_run_id: str | None = None,
+    tcue_id: str | None = None,
+    gcp_bucket: str | None = None,
     **kwargs,
 ) -> bool:
     """Run a command on your Android device using natural language.
@@ -196,6 +196,24 @@ async def run_command(
                 config.logging.debug = debug
             if save_trajectory is not None:
                 config.logging.save_trajectory = save_trajectory
+
+            # GCP logging overrides
+            if product_id and test_run_id and tcue_id:
+                config.logging.gcp.enabled = True
+                config.logging.gcp.product_id = product_id
+                config.logging.gcp.test_run_id = test_run_id
+                config.logging.gcp.tcue_id = tcue_id
+                if gcp_bucket:
+                    config.logging.gcp.bucket_name = gcp_bucket
+                else:
+                    config.logging.gcp.bucket_name = "nova_assets"  # Default bucket
+                # Auto-enable trajectory saving for GCP upload
+                if config.logging.save_trajectory == "none":
+                    config.logging.save_trajectory = "action"
+                logger.debug(
+                    f"CLI override: GCP logging enabled -> "
+                    f"{config.logging.gcp.bucket_name}/{product_id}/{test_run_id}/{tcue_id}"
+                )
 
             # Tracing overrides
             if tracing is not None:
@@ -444,6 +462,26 @@ def cli():
     default=None,
 )
 @click.option("--ios", type=bool, default=None, help="Run on iOS device")
+@click.option(
+    "--product-id",
+    help="Product ID for GCP logging (enables GCP upload when set with --test-run-id and --tcue-id)",
+    default=None,
+)
+@click.option(
+    "--test-run-id",
+    help="Test run ID for GCP logging",
+    default=None,
+)
+@click.option(
+    "--tcue-id",
+    help="Test case under execution ID for GCP logging",
+    default=None,
+)
+@click.option(
+    "--gcp-bucket",
+    help="GCP bucket name for trajectory uploads (default: nova_assets)",
+    default=None,
+)
 @coro
 async def run(
     command: str,
@@ -463,6 +501,10 @@ async def run(
     tcp: bool | None,
     save_trajectory: str | None,
     ios: bool | None,
+    product_id: str | None,
+    test_run_id: str | None,
+    tcue_id: str | None,
+    gcp_bucket: str | None,
 ):
     """Run a command on your Android device using natural language."""
 
@@ -485,6 +527,10 @@ async def run(
             temperature=temperature,
             save_trajectory=save_trajectory,
             ios=ios if ios is not None else False,
+            product_id=product_id,
+            test_run_id=test_run_id,
+            tcue_id=tcue_id,
+            gcp_bucket=gcp_bucket,
         )
     finally:
         # Disable DroidRun keyboard after execution
@@ -550,7 +596,7 @@ async def disconnect(serial: str):
         console.print(f"[red]Error disconnecting from device: {e}[/]")
 
 
-async def _setup_portal(path: str | None, device: str | None, debug: bool, latest: bool = False, specific_version: str | None = None):
+async def _setup_portal(path: str | None, device: str | None, debug: bool):
     """Internal async function to install and enable the DroidRun Portal on a device."""
     try:
         if not device:
@@ -569,27 +615,12 @@ async def _setup_portal(path: str | None, device: str | None, debug: bool, lates
             )
             return
 
-        if path:
-            console.print(f"[bold blue]Using provided APK:[/] {path}")
-            apk_context = nullcontext(path)
-        elif specific_version:
-            version = specific_version.lstrip("v")
-            version = f"v{version}"
-            download_base = "https://github.com/droidrun/droidrun-portal/releases/download"
-            apk_context = download_versioned_portal_apk(version, download_base, debug)
-        elif latest:
-            console.print("[bold blue]Downloading latest Portal APK...[/]")
+        if not path:
+            console.print("[bold blue]Downloading DroidRun Portal APK...[/]")
             apk_context = download_portal_apk(debug)
         else:
-            from droidrun import __version__
-            portal_version, download_base, mapping_fetched = get_compatible_portal_version(__version__, debug)
-
-            if portal_version:
-                apk_context = download_versioned_portal_apk(portal_version, download_base, debug)
-            else:
-                if not mapping_fetched:
-                    console.print("[yellow]Could not fetch version mapping, falling back to latest...[/]")
-                apk_context = download_portal_apk(debug)
+            console.print(f"[bold blue]Using provided APK:[/] {path}")
+            apk_context = nullcontext(path)
 
         with apk_context as apk_path:
             if not os.path.exists(apk_path):
@@ -662,20 +693,12 @@ async def _setup_portal(path: str | None, device: str | None, debug: bool, lates
     default=None,
 )
 @click.option(
-    "--portal-version", "-pv",
-    help="Specific Portal version to install (e.g., 0.4.7)",
-    default=None,
-)
-@click.option(
-    "--latest", is_flag=True, help="Install latest Portal instead of compatible version", default=False
-)
-@click.option(
     "--debug", is_flag=True, help="Enable verbose debug logging", default=False
 )
 @coro
-async def setup(path: str | None, device: str | None, portal_version: str | None, latest: bool, debug: bool):
+async def setup(path: str | None, device: str | None, debug: bool):
     """Install and enable the DroidRun Portal on a device."""
-    await _setup_portal(path, device, debug, latest, portal_version)
+    await _setup_portal(path, device, debug)
 
 
 @cli.command()

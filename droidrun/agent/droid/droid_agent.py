@@ -973,6 +973,32 @@ class DroidAgent(Workflow):
             await self.trajectory_writer.stop()
             logger.info(f"📁 Trajectory saved: {self.trajectory.trajectory_folder}")
 
+            # Upload to GCP if enabled
+            if self.config.logging.gcp.enabled:
+                try:
+                    from droidrun.agent.trajectory.gcp_upload import upload_trajectory_to_gcp
+
+                    gcp_result = upload_trajectory_to_gcp(
+                        trajectory_folder=str(self.trajectory.trajectory_folder),
+                        bucket_name=self.config.logging.gcp.bucket_name,
+                        product_id=self.config.logging.gcp.product_id,
+                        test_run_id=self.config.logging.gcp.test_run_id,
+                        tcue_id=self.config.logging.gcp.tcue_id,
+                    )
+                    if gcp_result["success"]:
+                        logger.info(f"☁️  Uploaded to GCP: {gcp_result['gcp_base_path']}")
+                    else:
+                        logger.warning(
+                            f"⚠️  GCP upload partial: {len(gcp_result['errors'])} errors"
+                        )
+                except ImportError as e:
+                    logger.warning(f"⚠️  GCP upload skipped (missing dependency): {e}")
+                except Exception as e:
+                    logger.error(f"❌ GCP upload failed: {e}")
+                    if self.config.logging.debug:
+                        import traceback
+                        logger.error(traceback.format_exc())
+
         self.tools_instance._set_context(None)
 
         return result
