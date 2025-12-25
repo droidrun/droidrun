@@ -28,7 +28,9 @@ from droidrun.macro.cli import macro_cli
 from droidrun.portal import (
     PORTAL_PACKAGE_NAME,
     download_portal_apk,
+    download_versioned_portal_apk,
     enable_portal_accessibility,
+    get_compatible_portal_version,
     ping_portal,
     ping_portal_content,
     ping_portal_tcp,
@@ -747,7 +749,7 @@ async def disconnect(serial: str):
         console.print(f"[red]Error disconnecting from device: {e}[/]")
 
 
-async def _setup_portal(path: str | None, device: str | None, debug: bool):
+async def _setup_portal(path: str | None, device: str | None, debug: bool, latest: bool = False, specific_version: str | None = None):
     """Internal async function to install and enable the DroidRun Portal on a device."""
     try:
         if not device:
@@ -766,12 +768,27 @@ async def _setup_portal(path: str | None, device: str | None, debug: bool):
             )
             return
 
-        if not path:
-            console.print("[bold blue]Downloading DroidRun Portal APK...[/]")
-            apk_context = download_portal_apk(debug)
-        else:
+        if path:
             console.print(f"[bold blue]Using provided APK:[/] {path}")
             apk_context = nullcontext(path)
+        elif specific_version:
+            version = specific_version.lstrip("v")
+            version = f"v{version}"
+            download_base = "https://github.com/droidrun/droidrun-portal/releases/download"
+            apk_context = download_versioned_portal_apk(version, download_base, debug)
+        elif latest:
+            console.print("[bold blue]Downloading latest Portal APK...[/]")
+            apk_context = download_portal_apk(debug)
+        else:
+            from droidrun import __version__
+            portal_version, download_base, mapping_fetched = get_compatible_portal_version(__version__, debug)
+
+            if portal_version:
+                apk_context = download_versioned_portal_apk(portal_version, download_base, debug)
+            else:
+                if not mapping_fetched:
+                    console.print("[yellow]Could not fetch version mapping, falling back to latest...[/]")
+                apk_context = download_portal_apk(debug)
 
         with apk_context as apk_path:
             if not os.path.exists(apk_path):
@@ -844,12 +861,20 @@ async def _setup_portal(path: str | None, device: str | None, debug: bool):
     default=None,
 )
 @click.option(
+    "--portal-version", "-pv",
+    help="Specific Portal version to install (e.g., 0.4.7)",
+    default=None,
+)
+@click.option(
+    "--latest", is_flag=True, help="Install latest Portal instead of compatible version", default=False
+)
+@click.option(
     "--debug", is_flag=True, help="Enable verbose debug logging", default=False
 )
 @coro
-async def setup(path: str | None, device: str | None, debug: bool):
+async def setup(path: str | None, device: str | None, portal_version: str | None, latest: bool, debug: bool):
     """Install and enable the DroidRun Portal on a device."""
-    await _setup_portal(path, device, debug)
+    await _setup_portal(path, device, debug, latest, portal_version)
 
 
 @cli.command()
