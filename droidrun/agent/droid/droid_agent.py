@@ -981,6 +981,42 @@ class DroidAgent(Workflow):
                     # Delete local files after upload unless keep_local is True
                     cleanup_local = not self.config.logging.gcp.keep_local
 
+                    # Build execution log from action history and summaries
+                    execution_log_lines = []
+                    execution_log_lines.append(f"Goal: {self.goal}")
+                    execution_log_lines.append(f"Total Steps: {self.shared_state.step_number}")
+                    execution_log_lines.append("=" * 80)
+                    execution_log_lines.append("")
+
+                    for i, summary in enumerate(self.shared_state.summary_history):
+                        step_num = i + 1
+                        action = self.shared_state.action_history[i] if i < len(self.shared_state.action_history) else {}
+                        outcome = self.shared_state.action_outcomes[i] if i < len(self.shared_state.action_outcomes) else None
+                        status = "PASS" if outcome else "FAIL" if outcome is not None else "N/A"
+
+                        execution_log_lines.append(f"🔄 Step {step_num}/{self.config.agent.max_steps}")
+                        if action:
+                            thought = action.get("thought", "")
+                            if thought:
+                                execution_log_lines.append(f"CodeAct response:")
+                                execution_log_lines.append(thought)
+                            code = action.get("code", "")
+                            if code:
+                                execution_log_lines.append(f"```python")
+                                execution_log_lines.append(code)
+                                execution_log_lines.append(f"```")
+                        execution_log_lines.append(f"💡 Execution result:")
+                        execution_log_lines.append(f"{summary}")
+                        execution_log_lines.append(f"[{status}]")
+                        execution_log_lines.append("")
+
+                    # Add final result
+                    execution_log_lines.append("=" * 80)
+                    execution_log_lines.append(f"Final Result: {'SUCCESS' if result.success else 'FAILED'}")
+                    execution_log_lines.append(f"Reason: {result.reason}")
+
+                    execution_log = "\n".join(execution_log_lines)
+
                     gcp_result = upload_trajectory_to_gcp(
                         trajectory_folder=str(self.trajectory.trajectory_folder),
                         bucket_name=self.config.logging.gcp.bucket_name,
@@ -988,6 +1024,7 @@ class DroidAgent(Workflow):
                         test_run_id=self.config.logging.gcp.test_run_id,
                         tcue_id=self.config.logging.gcp.tcue_id,
                         cleanup_local=cleanup_local,
+                        execution_log=execution_log,
                     )
                     if gcp_result["success"]:
                         if gcp_result["local_deleted"]:

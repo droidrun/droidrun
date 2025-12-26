@@ -141,6 +141,7 @@ def upload_trajectory_to_gcp(
     test_run_id: str,
     tcue_id: str,
     cleanup_local: bool = True,
+    execution_log: Optional[str] = None,
 ) -> dict:
     """
     Upload a trajectory folder to GCP with Nova-style path structure.
@@ -148,6 +149,7 @@ def upload_trajectory_to_gcp(
     Path structure: bucket/product_id/test_run_id/tcue_id/
         - trajectory.json
         - macro.json
+        - detailed_log.log (execution output)
         - screenshots/
             - 0000.png, 0001.png, ...
             - trajectory.gif
@@ -161,6 +163,7 @@ def upload_trajectory_to_gcp(
         test_run_id: Test run identifier
         tcue_id: Test case under execution identifier
         cleanup_local: If True, delete local trajectory folder after successful upload
+        execution_log: Optional string containing the execution log output to upload as detailed_log.log
 
     Returns:
         Dictionary with upload results:
@@ -217,6 +220,18 @@ def upload_trajectory_to_gcp(
                 result["uploaded_files"].append(uri)
             except Exception as e:
                 result["errors"].append(f"Failed to upload macro.json: {e}")
+
+        # Upload execution log as detailed_log.log
+        if execution_log:
+            try:
+                bucket = storage.get_bucket(bucket_name)
+                blob = bucket.blob(f"{gcp_prefix}/detailed_log.log")
+                blob.upload_from_string(execution_log, content_type="text/plain")
+                uri = f"gs://{bucket_name}/{gcp_prefix}/detailed_log.log"
+                result["uploaded_files"].append(uri)
+                logger.debug(f"Uploaded execution log to {uri}")
+            except Exception as e:
+                result["errors"].append(f"Failed to upload detailed_log.log: {e}")
 
         # Upload screenshots folder
         screenshots_folder = folder_path / "screenshots"
