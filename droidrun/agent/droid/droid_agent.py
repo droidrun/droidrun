@@ -983,7 +983,7 @@ class DroidAgent(Workflow):
 
                     # Build execution log from action history and summaries
                     execution_log_lines = []
-                    execution_log_lines.append(f"Goal: {self.goal}")
+                    execution_log_lines.append(f"Goal: {self.shared_state.instruction}")
                     execution_log_lines.append(f"Total Steps: {self.shared_state.step_number}")
                     execution_log_lines.append("=" * 80)
                     execution_log_lines.append("")
