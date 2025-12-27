@@ -107,7 +107,10 @@ class AdbTools(Tools):
 
         # Connect to device
         self.device = await adb.device(serial=self._serial)
-
+        # Check if device is online
+        state = await self.device.get_state()
+        if state != "device":
+            raise ConnectionError(f"Device is not online. State: {state}")
         # Initialize portal client
         self.portal = PortalClient(self.device, prefer_tcp=self._use_tcp)
         await self.portal.connect()
