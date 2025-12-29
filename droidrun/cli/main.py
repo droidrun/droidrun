@@ -29,8 +29,8 @@ from droidrun.portal import (
     PORTAL_PACKAGE_NAME,
     download_portal_apk,
     download_versioned_portal_apk,
-    enable_portal_accessibility,
     get_compatible_portal_version,
+    enable_portal_accessibility,
     ping_portal,
     ping_portal_content,
     ping_portal_tcp,
@@ -57,6 +57,7 @@ class TestRunResult:
         summary_history: List of summaries for each step
         success_rate: Percentage of successful actions (0.0 to 1.0)
         error: Error message if the run failed with an exception
+        video_url: GCS URL to the trajectory video (if GCP upload is enabled)
     """
     status: str  # "passed" or "failed"
     reasoning: List[str] = field(default_factory=list)
@@ -66,6 +67,7 @@ class TestRunResult:
     summary_history: List[str] = field(default_factory=list)
     success_rate: float = 0.0
     error: Optional[str] = None
+    video_url: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -78,6 +80,7 @@ class TestRunResult:
             "summary_history": self.summary_history,
             "success_rate": self.success_rate,
             "error": self.error,
+            "video_url": self.video_url,
         }
 
 # Suppress all warnings
@@ -435,7 +438,7 @@ async def run_command(
                 if result.reason:
                     full_reasoning.append(f"Final: {result.reason}")
 
-                return TestRunResult(
+                test_result = TestRunResult(
                     status="passed" if result.success else "failed",
                     reasoning=full_reasoning,
                     final_reason=result.reason,
@@ -444,7 +447,17 @@ async def run_command(
                     summary_history=list(shared_state.summary_history),
                     success_rate=success_rate,
                     error=None,
+                    video_url=shared_state.video_url,
                 )
+
+                # DEBUG: Print TestRunResult
+                print("\n" + "=" * 80)
+                print("DEBUG: TestRunResult")
+                print("=" * 80)
+                print(json.dumps(test_result.to_dict(), indent=2, default=str))
+                print("=" * 80 + "\n")
+
+                return test_result
 
             except KeyboardInterrupt:
                 log_handler.is_completed = True

@@ -1048,6 +1048,10 @@ class DroidAgent(Workflow):
                         execution_log=execution_log,
                     )
                     if gcp_result["success"]:
+                        # Set video URL in shared state for TestRunResult
+                        self.shared_state.video_url = (
+                            f"{gcp_result['gcp_base_path']}/screenshots/video.mp4"
+                        )
                         if gcp_result["local_deleted"]:
                             logger.info(f"☁️  Uploaded to GCP: {gcp_result['gcp_base_path']} (local deleted)")
                         else:

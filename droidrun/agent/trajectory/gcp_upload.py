@@ -70,13 +70,14 @@ class GCPStorageWrapper:
                 ".jpg": "image/jpeg",
                 ".jpeg": "image/jpeg",
                 ".txt": "text/plain",
+                ".mp4": "video/mp4",
             }.get(ext, "application/octet-stream")
 
         bucket = self.get_bucket(bucket_name)
         blob = bucket.blob(remote_path)
 
-        # Use binary mode for images, text mode for others
-        if content_type.startswith("image/"):
+        # Use binary mode for images and videos, text mode for others
+        if content_type.startswith("image/") or content_type.startswith("video/"):
             with open(local_path, "rb") as f:
                 blob.upload_from_file(f, content_type=content_type)
         else:
@@ -241,7 +242,7 @@ def upload_trajectory_to_gcp(
                     str(screenshots_folder),
                     bucket_name,
                     f"{gcp_prefix}/screenshots",
-                    file_extensions=[".png", ".gif"],
+                    file_extensions=[".png", ".gif", ".mp4"],
                 )
                 result["uploaded_files"].extend(uris)
             except Exception as e:
