@@ -151,6 +151,54 @@ class GifWriteJob(WriteJob):
 
 
 @dataclass(frozen=True)
+class Mp4WriteJob(WriteJob):
+    """Creates MP4 video from screenshots on disk."""
+
+    target_path: Path
+    screenshots_folder: Path
+    screenshot_count: int
+    fps: int = 1
+
+    async def execute(self) -> None:
+        def _create_mp4():
+            try:
+                import imageio.v3 as iio
+            except ImportError:
+                logger.warning("imageio not installed, skipping MP4 creation")
+                return
+
+            frames = []
+
+            for idx in range(self.screenshot_count):
+                screenshot_path = self.screenshots_folder / f"{idx:04d}.png"
+                if not screenshot_path.exists():
+                    logger.warning(f"Screenshot {idx:04d}.png not found, skipping")
+                    continue
+
+                try:
+                    frame = iio.imread(screenshot_path)
+                    frames.append(frame)
+                except Exception as e:
+                    logger.warning(f"Failed to load screenshot {idx}: {e}")
+                    continue
+
+            if frames:
+                try:
+                    iio.imwrite(
+                        str(self.target_path),
+                        frames,
+                        fps=self.fps,
+                        codec="libx264",
+                    )
+                    logger.debug(f"🎬 Created MP4 video at {self.target_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to create MP4: {e}")
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _create_mp4)
+
+
+@dataclass(frozen=True)
 class UIStateWriteJob(WriteJob):
     """Writes UI state JSON."""
 
@@ -325,18 +373,21 @@ class TrajectoryWriter:
             )
 
     def write_final(self, trajectory, trajectory_gifs) -> None:
-        """Write final trajectory data including GIF creation.
+        """Write final trajectory data including GIF and MP4 creation.
 
         Args:
             trajectory: Trajectory instance to finalize
         """
         self.write(trajectory, stage="final")
-        # GIF is only created at finalize (all screenshots available)
+        # GIF and MP4 are only created at finalize (all screenshots available)
         if trajectory_gifs is True:
             trajectory_id = trajectory.trajectory_folder.name
             gif_job = self._create_gif_job(trajectory, trajectory_id, "final")
             if gif_job:
                 self.worker.submit(gif_job)
+            mp4_job = self._create_mp4_job(trajectory, trajectory_id, "final")
+            if mp4_job:
+                self.worker.submit(mp4_job)
 
     def _create_events_job(
         self, events_snapshot, trajectory, trajectory_id, stage
@@ -433,6 +484,23 @@ class TrajectoryWriter:
             trajectory_id=trajectory_id,
             stage=stage,
             target_path=screenshots_folder / "trajectory.gif",
+            screenshots_folder=screenshots_folder,
+            screenshot_count=trajectory.screenshot_count,
+        )
+
+    def _create_mp4_job(
+        self, trajectory, trajectory_id, stage
+    ) -> Optional[Mp4WriteJob]:
+        if trajectory.screenshot_count == 0:
+            return None
+
+        screenshots_folder = trajectory.trajectory_folder / "screenshots"
+        screenshots_folder.mkdir(exist_ok=True)
+
+        return Mp4WriteJob(
+            trajectory_id=trajectory_id,
+            stage=stage,
+            target_path=screenshots_folder / "video.mp4",
             screenshots_folder=screenshots_folder,
             screenshot_count=trajectory.screenshot_count,
         )
