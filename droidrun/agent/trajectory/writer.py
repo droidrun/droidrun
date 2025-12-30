@@ -158,11 +158,13 @@ class Mp4WriteJob(WriteJob):
     screenshots_folder: Path
     screenshot_count: int
     fps: int = 1
+    macro_block_size: int = 16  # Standard macro block size for H.264
 
     async def execute(self) -> None:
         def _create_mp4():
             try:
                 import imageio.v3 as iio
+                import numpy as np
             except ImportError:
                 logger.warning("imageio not installed, skipping MP4 creation")
                 return
@@ -182,17 +184,56 @@ class Mp4WriteJob(WriteJob):
                     logger.warning(f"Failed to load screenshot {idx}: {e}")
                     continue
 
-            if frames:
-                try:
-                    iio.imwrite(
-                        str(self.target_path),
-                        frames,
-                        fps=self.fps,
-                        codec="libx264",
+            if not frames:
+                return
+
+            try:
+                # Get dimensions from first frame
+                height, width = frames[0].shape[:2]
+
+                # Calculate padded dimensions (round up to nearest macro_block_size)
+                padded_height = (
+                    (height + self.macro_block_size - 1)
+                    // self.macro_block_size
+                    * self.macro_block_size
+                )
+                padded_width = (
+                    (width + self.macro_block_size - 1)
+                    // self.macro_block_size
+                    * self.macro_block_size
+                )
+
+                # Pad frames if necessary
+                if padded_height != height or padded_width != width:
+                    padded_frames = []
+                    for frame in frames:
+                        # Create black padded frame
+                        if len(frame.shape) == 3:
+                            padded = np.zeros(
+                                (padded_height, padded_width, frame.shape[2]),
+                                dtype=frame.dtype,
+                            )
+                        else:
+                            padded = np.zeros(
+                                (padded_height, padded_width), dtype=frame.dtype
+                            )
+                        # Copy original frame to top-left corner
+                        padded[:height, :width] = frame
+                        padded_frames.append(padded)
+                    frames = padded_frames
+                    logger.debug(
+                        f"Padded frames from {width}x{height} to {padded_width}x{padded_height}"
                     )
-                    logger.debug(f"🎬 Created MP4 video at {self.target_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to create MP4: {e}")
+
+                iio.imwrite(
+                    str(self.target_path),
+                    frames,
+                    fps=self.fps,
+                    codec="libx264",
+                )
+                logger.debug(f"🎬 Created MP4 video at {self.target_path}")
+            except Exception as e:
+                logger.warning(f"Failed to create MP4: {e}")
 
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, _create_mp4)
