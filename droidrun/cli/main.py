@@ -8,7 +8,9 @@ import os
 import sys
 import warnings
 from contextlib import nullcontext
+from dataclasses import dataclass, field
 from functools import wraps
+from typing import List, Dict, Any, Optional
 
 import click
 import importlib.metadata
@@ -23,13 +25,12 @@ from droidrun import ResultEvent, DroidAgent
 from droidrun.cli.logs import LogHandler
 from droidrun.config_manager import DroidrunConfig
 from droidrun.macro.cli import macro_cli
-from droidrun import __version__
 from droidrun.portal import (
     PORTAL_PACKAGE_NAME,
     download_portal_apk,
     download_versioned_portal_apk,
-    enable_portal_accessibility,
     get_compatible_portal_version,
+    enable_portal_accessibility,
     ping_portal,
     ping_portal_content,
     ping_portal_tcp,
@@ -37,6 +38,56 @@ from droidrun.portal import (
 from droidrun.telemetry import print_telemetry_message
 from droidrun.agent.utils.llm_picker import load_llm
 import json
+
+
+@dataclass
+class TestRunResult:
+    """
+    Result from a DroidRun test execution.
+
+    This is returned by run_command_with_result() and provides full details
+    about the test run including status, reasoning, and step-by-step observations.
+
+    Attributes:
+        status: "passed" or "failed" - final verified status from verification agent
+        reasoning: Verification reasoning explaining why the test passed or failed
+        final_reason: The final reason/answer from the agent
+        steps_taken: Number of steps executed
+        action_history: List of actions taken during execution
+        summary_history: List of summaries for each step
+        success_rate: Percentage of successful actions (0.0 to 1.0)
+        error: Error message if the run failed with an exception
+        video_url: GCS URL to the trajectory video (if GCP upload is enabled)
+        confidence: Verification confidence level (0.0 to 1.0)
+        false_negative_detected: True if verification detected a false negative
+    """
+    status: str  # "passed" or "failed"
+    reasoning: str = ""
+    final_reason: str = ""
+    steps_taken: int = 0
+    action_history: List[Dict[str, Any]] = field(default_factory=list)
+    summary_history: List[str] = field(default_factory=list)
+    success_rate: float = 0.0
+    error: Optional[str] = None
+    video_url: Optional[str] = None
+    confidence: float = 0.0
+    false_negative_detected: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "status": self.status,
+            "reasoning": self.reasoning,
+            "final_reason": self.final_reason,
+            "steps_taken": self.steps_taken,
+            "action_history": self.action_history,
+            "summary_history": self.summary_history,
+            "success_rate": self.success_rate,
+            "error": self.error,
+            "video_url": self.video_url,
+            "confidence": self.confidence,
+            "false_negative_detected": self.false_negative_detected,
+        }
 
 # Suppress all warnings
 warnings.filterwarnings("ignore")
@@ -83,8 +134,7 @@ async def get_portal_version(device_obj) -> str | None:
             version_data = json.loads(json_str)
 
             if version_data.get("status") == "success":
-                # Check for 'result' first (new portal), then 'data' (legacy)
-                return version_data.get("result") or version_data.get("data")
+                return version_data.get("data")
         return None
     except Exception:
         return None
@@ -111,12 +161,71 @@ async def run_command(
     save_trajectory: str | None = None,
     ios: bool = False,
     temperature: float | None = None,
+    product_id: str | None = None,
+    test_run_id: str | None = None,
+    tcue_id: str | None = None,
+    gcp_bucket: str | None = None,
+    keep_local: bool = False,
+    rich_text: bool | None = None,
     **kwargs,
-) -> bool:
-    """Run a command on your Android device using natural language.
+) -> TestRunResult:
+    """
+    Run a command on your Android device and return full test results.
+
+    This is the Python API hook for external systems (like Nova) to call DroidRun
+    and get detailed results including status, reasoning, and step-by-step observations.
+
+    Args:
+        command: The natural language command/goal to execute
+        config_path: Optional path to a YAML config file
+        device: Device serial number or IP address
+        provider: LLM provider (OpenAI, Anthropic, etc.)
+        model: LLM model name
+        steps: Maximum number of steps
+        base_url: Base URL for API
+        api_base: Base URL for OpenAI-like APIs
+        vision: Enable vision for all agents
+        manager_vision: Enable vision for manager agent
+        executor_vision: Enable vision for executor agent
+        codeact_vision: Enable vision for codeact agent
+        reasoning: Enable planning with reasoning
+        stream: Stream LLM responses
+        tracing: Enable tracing
+        debug: Enable debug logging
+        tcp: Use TCP communication
+        save_trajectory: Trajectory saving level ("none", "step", "action")
+        ios: Run on iOS device
+        temperature: LLM temperature
+        product_id: Product ID for GCP logging
+        test_run_id: Test run ID for GCP logging
+        tcue_id: Test case under execution ID for GCP logging
+        gcp_bucket: GCP bucket name
+        keep_local: Keep local trajectory files after GCP upload
+        rich_text: Enable rich text console output (uses config default if not specified)
+        **kwargs: Additional arguments passed to LLM
 
     Returns:
-        bool: True if the task completed successfully, False otherwise.
+        TestRunResult: Full test results including:
+            - status: "passed" or "failed"
+            - reasoning: List of step-by-step observations
+            - final_reason: The agent's final answer/reason
+            - steps_taken: Number of steps executed
+            - action_history: List of actions taken
+            - summary_history: List of step summaries
+            - success_rate: Percentage of successful actions
+            - error: Error message if execution failed
+
+    Example:
+        >>> import asyncio
+        >>> from droidrun.cli.main import run_command, TestRunResult
+        >>>
+        >>> result = asyncio.run(run_command(
+        ...     command="Open Settings and navigate to WiFi",
+        ...     device="emulator-5554",
+        ...     reasoning=True,
+        ... ))
+        >>> print(f"Status: {result.status}")
+        >>> print(f"Reasoning: {result.reasoning}")
     """
     # Load config: use provided file or defaults
     if config_path:
@@ -196,6 +305,26 @@ async def run_command(
                 config.logging.debug = debug
             if save_trajectory is not None:
                 config.logging.save_trajectory = save_trajectory
+
+            # GCP logging overrides
+            if product_id and test_run_id and tcue_id:
+                config.logging.gcp.enabled = True
+                config.logging.gcp.product_id = product_id
+                config.logging.gcp.test_run_id = test_run_id
+                config.logging.gcp.tcue_id = tcue_id
+                config.logging.gcp.keep_local = keep_local
+                if gcp_bucket:
+                    config.logging.gcp.bucket_name = gcp_bucket
+                else:
+                    config.logging.gcp.bucket_name = "nova_assets"  # Default bucket
+                # Auto-enable trajectory saving for GCP upload
+                if config.logging.save_trajectory == "none":
+                    config.logging.save_trajectory = "action"
+                logger.debug(
+                    f"CLI override: GCP logging enabled -> "
+                    f"{config.logging.gcp.bucket_name}/{product_id}/{test_run_id}/{tcue_id}"
+                    f" (keep_local={keep_local})"
+                )
 
             # Tracing overrides
             if tracing is not None:
@@ -281,7 +410,7 @@ async def run_command(
             )
 
             # ================================================================
-            # STEP 3: Run agent
+            # STEP 3: Run agent and collect results
             # ================================================================
 
             logger.debug("▶️  Starting agent execution...")
@@ -293,15 +422,69 @@ async def run_command(
 
                 async for event in handler.stream_events():
                     log_handler.handle_event(event)
+
                 result: ResultEvent = await handler
-                return result.success
+
+                # Extract data from shared state for TestRunResult
+                shared_state = droid_agent.shared_state
+                action_outcomes = shared_state.action_outcomes
+                success_rate = (
+                    sum(action_outcomes) / len(action_outcomes)
+                    if action_outcomes
+                    else 0.0
+                )
+
+                # Run verification agent to get holistic test result
+                from droidrun.agent.oneflows.verification_agent import verify_test_case
+
+                # Get LLM for verification (use same LLM as agent)
+                verification_llm = llm if llm else droid_agent.llm
+
+                logger.info("🔍 Running verification agent...")
+                verification_result = await verify_test_case(
+                    llm=verification_llm,
+                    goal=command,
+                    action_history=list(shared_state.action_history),
+                    summary_history=list(shared_state.summary_history),
+                    action_outcomes=list(action_outcomes),
+                    final_reason=result.reason,
+                    final_state=shared_state.formatted_device_state,
+                )
+
+                test_result = TestRunResult(
+                    status=verification_result.status,
+                    reasoning=verification_result.reasoning,
+                    final_reason=result.reason,
+                    steps_taken=result.steps,
+                    action_history=list(shared_state.action_history),
+                    summary_history=list(shared_state.summary_history),
+                    success_rate=success_rate,
+                    error=None,
+                    video_url=shared_state.video_url,
+                    confidence=verification_result.confidence,
+                    false_negative_detected=verification_result.false_negative_detected,
+                )
+
+                # DEBUG: Print TestRunResult
+                print("\n" + "=" * 80)
+                print("DEBUG: TestRunResult")
+                print("=" * 80)
+                print(json.dumps(test_result.to_dict(), indent=2, default=str))
+                print("=" * 80 + "\n")
+
+                return test_result
 
             except KeyboardInterrupt:
                 log_handler.is_completed = True
                 log_handler.is_success = False
                 log_handler.current_step = "Stopped by user"
                 logger.info("⏹️ Stopped by user")
-                return False
+                return TestRunResult(
+                    status="failed",
+                    reasoning="Execution stopped by user",
+                    final_reason="Stopped by user",
+                    error="KeyboardInterrupt",
+                )
 
             except Exception as e:
                 log_handler.is_completed = True
@@ -310,9 +493,13 @@ async def run_command(
                 logger.error(f"💥 Error: {e}")
                 if config.logging.debug:
                     import traceback
-
                     logger.debug(traceback.format_exc())
-                return False
+                return TestRunResult(
+                    status="failed",
+                    reasoning=f"Execution error: {str(e)}",
+                    final_reason=str(e),
+                    error=str(e),
+                )
 
         except Exception as e:
             log_handler.current_step = f"Error: {e}"
@@ -320,9 +507,13 @@ async def run_command(
             debug_mode = debug if debug is not None else config.logging.debug
             if debug_mode:
                 import traceback
-
                 logger.debug(traceback.format_exc())
-            return False
+            return TestRunResult(
+                status="failed",
+                reasoning=f"Setup error: {str(e)}",
+                final_reason=str(e),
+                error=str(e),
+            )
 
 
 class DroidRunCLI(click.Group):
@@ -444,6 +635,32 @@ def cli():
     default=None,
 )
 @click.option("--ios", type=bool, default=None, help="Run on iOS device")
+@click.option(
+    "--product-id",
+    help="Product ID for GCP logging (enables GCP upload when set with --test-run-id and --tcue-id)",
+    default=None,
+)
+@click.option(
+    "--test-run-id",
+    help="Test run ID for GCP logging",
+    default=None,
+)
+@click.option(
+    "--tcue-id",
+    help="Test case under execution ID for GCP logging",
+    default=None,
+)
+@click.option(
+    "--gcp-bucket",
+    help="GCP bucket name for trajectory uploads (default: nova_assets)",
+    default=None,
+)
+@click.option(
+    "--keep-local",
+    is_flag=True,
+    default=False,
+    help="Keep local trajectory files after GCP upload (for debugging)",
+)
 @coro
 async def run(
     command: str,
@@ -463,11 +680,16 @@ async def run(
     tcp: bool | None,
     save_trajectory: str | None,
     ios: bool | None,
+    product_id: str | None,
+    test_run_id: str | None,
+    tcue_id: str | None,
+    gcp_bucket: str | None,
+    keep_local: bool,
 ):
     """Run a command on your Android device using natural language."""
 
     try:
-        success = await run_command(
+        result = await run_command(
             command=command,
             config_path=config,
             device=device,
@@ -485,6 +707,11 @@ async def run(
             temperature=temperature,
             save_trajectory=save_trajectory,
             ios=ios if ios is not None else False,
+            product_id=product_id,
+            test_run_id=test_run_id,
+            tcue_id=tcue_id,
+            gcp_bucket=gcp_bucket,
+            keep_local=keep_local,
         )
     finally:
         # Disable DroidRun keyboard after execution
@@ -499,8 +726,8 @@ async def run(
         except Exception:
             click.echo("Failed to disable DroidRun keyboard")
 
-    # Exit with appropriate code
-    sys.exit(0 if success else 1)
+    # Exit with appropriate code based on test result status
+    sys.exit(0 if result.status == "passed" else 1)
 
 
 @cli.command()
