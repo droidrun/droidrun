@@ -17,7 +17,7 @@ from llama_index.core.workflow import Context, StartEvent, StopEvent, Workflow, 
 from workflows.events import Event
 from workflows.handler import WorkflowHandler
 from droidrun.agent.codeact import CodeActAgent
-from droidrun.agent.codeact.events import CodeActOutputEvent
+from droidrun.agent.codeact.events import CodeActOutputEvent, CodeActResponseEvent
 from droidrun.agent.common.events import MacroEvent, RecordUIStateEvent, ScreenshotEvent
 from droidrun.agent.droid.events import (
     CodeActExecuteEvent,
@@ -396,10 +396,30 @@ class DroidAgent(Workflow):
                 remembered_info=self.tools_instance.memory,
             )
 
+            # Track current step's action for history
+            current_action = {}
+
             async for nested_ev in handler.stream_events():
                 self.handle_stream_event(nested_ev, ctx)
 
+                # Capture thought and code from CodeActResponseEvent
+                if isinstance(nested_ev, CodeActResponseEvent):
+                    current_action = {
+                        "thought": nested_ev.thought or "",
+                        "code": nested_ev.code or "",
+                    }
+
                 if isinstance(nested_ev, CodeActOutputEvent):
+                    current_output = nested_ev.output or ""
+
+                    # Record action and summary for this step
+                    self.shared_state.action_history.append(current_action.copy())
+                    self.shared_state.summary_history.append(current_output)
+                    self.shared_state.action_outcomes.append(True)  # Successful execution
+
+                    # Reset for next iteration
+                    current_action = {}
+
                     if self.config.logging.save_trajectory != "none":
                         self.shared_state.step_number += 1
                         self.trajectory_writer.write(
