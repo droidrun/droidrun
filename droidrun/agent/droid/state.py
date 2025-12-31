@@ -99,6 +99,11 @@ class DroidAgentState(BaseModel):
     custom_variables: Dict = Field(default_factory=dict)
     output_dir: str = ""
 
+    # ========================================================================
+    # GCP/Video URL (set after trajectory upload)
+    # ========================================================================
+    video_url: str | None = None
+
     def update_current_app(self, package_name: str, activity_name: str):
         """
         Update package and activity together, capturing telemetry event only once.
