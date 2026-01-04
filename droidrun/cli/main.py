@@ -8,7 +8,9 @@ import os
 import sys
 import warnings
 from contextlib import nullcontext
+from dataclasses import dataclass, field
 from functools import wraps
+from typing import List, Dict, Any, Optional
 
 import click
 import importlib.metadata
@@ -37,6 +39,53 @@ from droidrun.portal import (
 from droidrun.telemetry import print_telemetry_message
 from droidrun.agent.utils.llm_picker import load_llm
 import json
+
+@dataclass
+class TestRunResult:
+    """
+    Result from a DroidRun test execution.
+
+    Attributes:
+        status: "passed" or "failed"
+        reasoning: Verification reasoning explaining why the test passed or failed
+        final_reason: The final reason/answer from the agent
+        steps_taken: Number of steps executed
+        action_history: List of actions taken during execution
+        summary_history: List of summaries for each step
+        success_rate: Percentage of successful actions (0.0 to 1.0)
+        error: Error message if the run failed with an exception
+        video_url: GCS URL to the trajectory video (if GCP upload is enabled)
+        confidence: Verification confidence level (0.0 to 1.0)
+        false_negative_detected: True if verification detected a false negative
+    """
+    status: str
+    reasoning: str = ""
+    final_reason: str = ""
+    steps_taken: int = 0
+    action_history: List[Dict[str, Any]] = field(default_factory=list)
+    summary_history: List[str] = field(default_factory=list)
+    success_rate: float = 0.0
+    error: Optional[str] = None
+    video_url: Optional[str] = None
+    confidence: float = 0.0
+    false_negative_detected: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "status": self.status,
+            "reasoning": self.reasoning,
+            "final_reason": self.final_reason,
+            "steps_taken": self.steps_taken,
+            "action_history": self.action_history,
+            "summary_history": self.summary_history,
+            "success_rate": self.success_rate,
+            "error": self.error,
+            "video_url": self.video_url,
+            "confidence": self.confidence,
+            "false_negative_detected": self.false_negative_detected,
+        }
+
 
 # Suppress all warnings
 warnings.filterwarnings("ignore")
