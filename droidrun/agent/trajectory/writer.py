@@ -230,6 +230,7 @@ class Mp4WriteJob(WriteJob):
                     frames,
                     fps=self.fps,
                     codec="libx264",
+                    output_params=["-probesize", "50M"],
                 )
                 logger.debug(f"🎬 Created MP4 video at {self.target_path}")
             except Exception as e:

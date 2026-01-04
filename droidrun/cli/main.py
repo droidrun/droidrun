@@ -49,8 +49,8 @@ class TestRunResult:
     about the test run including status, reasoning, and step-by-step observations.
 
     Attributes:
-        status: "passed" or "failed" based on whether the goal was achieved
-        reasoning: List of reasoning steps/observations during execution
+        status: "passed" or "failed" - final verified status from verification agent
+        reasoning: Verification reasoning explaining why the test passed or failed
         final_reason: The final reason/answer from the agent
         steps_taken: Number of steps executed
         action_history: List of actions taken during execution
@@ -58,9 +58,11 @@ class TestRunResult:
         success_rate: Percentage of successful actions (0.0 to 1.0)
         error: Error message if the run failed with an exception
         video_url: GCS URL to the trajectory video (if GCP upload is enabled)
+        confidence: Verification confidence level (0.0 to 1.0)
+        false_negative_detected: True if verification detected a false negative
     """
     status: str  # "passed" or "failed"
-    reasoning: List[str] = field(default_factory=list)
+    reasoning: str = ""
     final_reason: str = ""
     steps_taken: int = 0
     action_history: List[Dict[str, Any]] = field(default_factory=list)
@@ -68,6 +70,8 @@ class TestRunResult:
     success_rate: float = 0.0
     error: Optional[str] = None
     video_url: Optional[str] = None
+    confidence: float = 0.0
+    false_negative_detected: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -81,6 +85,8 @@ class TestRunResult:
             "success_rate": self.success_rate,
             "error": self.error,
             "video_url": self.video_url,
+            "confidence": self.confidence,
+            "false_negative_detected": self.false_negative_detected,
         }
 
 # Suppress all warnings
@@ -428,19 +434,26 @@ async def run_command(
                     else 0.0
                 )
 
-                # Build reasoning list from summary history
-                full_reasoning = []
-                for i, summary in enumerate(shared_state.summary_history):
-                    step_status = "PASS" if i < len(action_outcomes) and action_outcomes[i] else "FAIL"
-                    full_reasoning.append(f"Step {i+1} [{step_status}]: {summary}")
+                # Run verification agent to get holistic test result
+                from droidrun.agent.oneflows.verification_agent import verify_test_case
 
-                # Add final reason as last reasoning step if available
-                if result.reason:
-                    full_reasoning.append(f"Final: {result.reason}")
+                # Get LLM for verification (use same LLM as agent)
+                verification_llm = llm if llm else droid_agent.llm
+
+                logger.info("🔍 Running verification agent...")
+                verification_result = await verify_test_case(
+                    llm=verification_llm,
+                    goal=command,
+                    action_history=list(shared_state.action_history),
+                    summary_history=list(shared_state.summary_history),
+                    action_outcomes=list(action_outcomes),
+                    final_reason=result.reason,
+                    final_state=shared_state.formatted_device_state,
+                )
 
                 test_result = TestRunResult(
-                    status="passed" if result.success else "failed",
-                    reasoning=full_reasoning,
+                    status=verification_result.status,
+                    reasoning=verification_result.reasoning,
                     final_reason=result.reason,
                     steps_taken=result.steps,
                     action_history=list(shared_state.action_history),
@@ -448,6 +461,8 @@ async def run_command(
                     success_rate=success_rate,
                     error=None,
                     video_url=shared_state.video_url,
+                    confidence=verification_result.confidence,
+                    false_negative_detected=verification_result.false_negative_detected,
                 )
 
                 # DEBUG: Print TestRunResult
@@ -466,7 +481,7 @@ async def run_command(
                 logger.info("⏹️ Stopped by user")
                 return TestRunResult(
                     status="failed",
-                    reasoning=["Execution stopped by user"],
+                    reasoning="Execution stopped by user",
                     final_reason="Stopped by user",
                     error="KeyboardInterrupt",
                 )
@@ -481,7 +496,7 @@ async def run_command(
                     logger.debug(traceback.format_exc())
                 return TestRunResult(
                     status="failed",
-                    reasoning=[f"Execution error: {str(e)}"],
+                    reasoning=f"Execution error: {str(e)}",
                     final_reason=str(e),
                     error=str(e),
                 )
@@ -495,7 +510,7 @@ async def run_command(
                 logger.debug(traceback.format_exc())
             return TestRunResult(
                 status="failed",
-                reasoning=[f"Setup error: {str(e)}"],
+                reasoning=f"Setup error: {str(e)}",
                 final_reason=str(e),
                 error=str(e),
             )
