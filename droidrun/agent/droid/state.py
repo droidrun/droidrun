@@ -100,9 +100,9 @@ class DroidAgentState(BaseModel):
     output_dir: str = ""
 
     # ========================================================================
-    # GCP/Video URL (set after trajectory upload)
+    # GCP Upload Results
     # ========================================================================
-    video_url: str | None = None
+    video_url: str | None = None  # GCS URL to trajectory video after upload
 
     def update_current_app(self, package_name: str, activity_name: str):
         """
