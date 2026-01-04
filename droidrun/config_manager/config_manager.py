@@ -163,6 +163,18 @@ class TracingConfig:
 
 
 @dataclass
+class GCPLoggingConfig:
+    """GCP logging configuration for trajectory uploads."""
+
+    enabled: bool = False
+    bucket_name: str = ""
+    product_id: str = ""
+    test_run_id: str = ""
+    tcue_id: str = ""
+    keep_local: bool = False  # If False, delete local files after GCP upload
+
+
+@dataclass
 class LoggingConfig:
     """Logging configuration."""
 
@@ -171,6 +183,7 @@ class LoggingConfig:
     trajectory_path: str = "trajectories"
     rich_text: bool = False
     trajectory_gifs: bool = True
+    gcp: GCPLoggingConfig = field(default_factory=GCPLoggingConfig)
 
 
 @dataclass
@@ -323,13 +336,23 @@ class DroidrunConfig:
             else SafeExecutionConfig()
         )
 
+        # Parse logging config with nested GCP config
+        logging_data = data.get("logging", {})
+        gcp_logging_data = logging_data.pop("gcp", {}) if "gcp" in logging_data else {}
+        gcp_logging_config = (
+            GCPLoggingConfig(**gcp_logging_data)
+            if gcp_logging_data
+            else GCPLoggingConfig()
+        )
+        logging_config = LoggingConfig(**logging_data, gcp=gcp_logging_config)
+
         return cls(
             agent=agent_config,
             llm_profiles=llm_profiles,
             device=DeviceConfig(**data.get("device", {})),
             telemetry=TelemetryConfig(**data.get("telemetry", {})),
             tracing=TracingConfig(**data.get("tracing", {})),
-            logging=LoggingConfig(**data.get("logging", {})),
+            logging=logging_config,
             tools=ToolsConfig(**data.get("tools", {})),
             credentials=CredentialsConfig(**data.get("credentials", {})),
             safe_execution=safe_execution_config,

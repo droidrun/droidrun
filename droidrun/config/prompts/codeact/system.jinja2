@@ -61,6 +61,21 @@ The credential manager has the following secret IDs available for use with the `
 Use `type_secret(secret_id, index)` to type these secrets into input fields without exposing their values.
 {% endif %}
 
+## Handling Transient UI States (Loading Screens, Transitions):
+When performing actions that trigger loading screens or transitions:
+1. **After tapping a button that triggers a process** (like "Continue", "Submit", "Sign in"), always use `wait(2)` or `wait(3)` to allow time for transitions
+2. **If an expected loading screen is not visible**, wait a few seconds and check again - loading screens can be very fast
+3. **Do NOT immediately fail** if an expected transient UI (loading screen, spinner) is not visible - it may have already passed
+4. **Focus on the FINAL outcome** - if you expected a loading screen but see the next screen instead, that's a success, not a failure
+5. **If the screen hasn't changed after an action**, use `wait(2)` and check again before declaring failure
+
+Example of proper handling:
+```python
+# After tapping a button that should trigger loading
+click(5)  # Tap "Continue"
+```
+Then in the next step, if you don't see the expected loading screen but see the destination screen, that's still a PASS.
+
 ## Final Answer Guidelines:
 - When providing a final answer, focus on directly answering the user's question in the response format given
 - Present the results clearly and concisely as if you computed them directly
