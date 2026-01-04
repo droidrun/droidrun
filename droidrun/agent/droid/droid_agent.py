@@ -398,6 +398,7 @@ class DroidAgent(Workflow):
 
             # Track current step's action for history
             current_action = {}
+            current_output = ""
 
             async for nested_ev in handler.stream_events():
                 self.handle_stream_event(nested_ev, ctx)
@@ -992,6 +993,80 @@ class DroidAgent(Workflow):
             )
             await self.trajectory_writer.stop()
             logger.info(f"📁 Trajectory saved: {self.trajectory.trajectory_folder}")
+
+            # Upload to GCP if enabled
+            if self.config.logging.gcp.enabled:
+                try:
+                    from droidrun.agent.trajectory.gcp_upload import upload_trajectory_to_gcp
+
+                    # Delete local files after upload unless keep_local is True
+                    cleanup_local = not self.config.logging.gcp.keep_local
+
+                    # Build execution log from action history and summaries
+                    execution_log_lines = []
+                    execution_log_lines.append(f"Goal: {self.shared_state.instruction}")
+                    execution_log_lines.append(f"Total Steps: {self.shared_state.step_number}")
+                    execution_log_lines.append("=" * 80)
+                    execution_log_lines.append("")
+
+                    for i, summary in enumerate(self.shared_state.summary_history):
+                        step_num = i + 1
+                        action = self.shared_state.action_history[i] if i < len(self.shared_state.action_history) else {}
+                        outcome = self.shared_state.action_outcomes[i] if i < len(self.shared_state.action_outcomes) else None
+                        status = "PASS" if outcome else "FAIL" if outcome is not None else "N/A"
+
+                        execution_log_lines.append(f"🔄 Step {step_num}/{self.config.agent.max_steps}")
+                        if action:
+                            thought = action.get("thought", "")
+                            if thought:
+                                execution_log_lines.append(f"CodeAct response:")
+                                execution_log_lines.append(thought)
+                            code = action.get("code", "")
+                            if code:
+                                execution_log_lines.append(f"```python")
+                                execution_log_lines.append(code)
+                                execution_log_lines.append(f"```")
+                        execution_log_lines.append(f"💡 Execution result:")
+                        execution_log_lines.append(f"{summary}")
+                        execution_log_lines.append(f"[{status}]")
+                        execution_log_lines.append("")
+
+                    # Add final result
+                    execution_log_lines.append("=" * 80)
+                    execution_log_lines.append(f"Final Result: {'SUCCESS' if result.success else 'FAILED'}")
+                    execution_log_lines.append(f"Reason: {result.reason}")
+
+                    execution_log = "\n".join(execution_log_lines)
+
+                    gcp_result = upload_trajectory_to_gcp(
+                        trajectory_folder=str(self.trajectory.trajectory_folder),
+                        bucket_name=self.config.logging.gcp.bucket_name,
+                        product_id=self.config.logging.gcp.product_id,
+                        test_run_id=self.config.logging.gcp.test_run_id,
+                        tcue_id=self.config.logging.gcp.tcue_id,
+                        cleanup_local=cleanup_local,
+                        execution_log=execution_log,
+                    )
+                    if gcp_result["success"]:
+                        # Set video URL in shared state for TestRunResult
+                        self.shared_state.video_url = (
+                            f"{gcp_result['gcp_base_path']}/screenshots/video.mp4"
+                        )
+                        if gcp_result["local_deleted"]:
+                            logger.info(f"☁️  Uploaded to GCP: {gcp_result['gcp_base_path']} (local deleted)")
+                        else:
+                            logger.info(f"☁️  Uploaded to GCP: {gcp_result['gcp_base_path']}")
+                    else:
+                        logger.warning(
+                            f"⚠️  GCP upload partial: {len(gcp_result['errors'])} errors"
+                        )
+                except ImportError as e:
+                    logger.warning(f"⚠️  GCP upload skipped (missing dependency): {e}")
+                except Exception as e:
+                    logger.error(f"❌ GCP upload failed: {e}")
+                    if self.config.logging.debug:
+                        import traceback
+                        logger.error(traceback.format_exc())
 
         self.tools_instance._set_context(None)
 
