@@ -153,11 +153,15 @@ class DroidAgent(Workflow):
 
         self.user_id = kwargs.pop("user_id", None)
         self.runtype = kwargs.pop("runtype", "developer")
+        self.app_name = kwargs.pop("app_name", None)
+        self.app_link = kwargs.pop("app_link", None)
         self.shared_state = DroidAgentState(
             instruction=goal,
             err_to_manager_thresh=2,
             user_id=self.user_id,
             runtype=self.runtype,
+            app_name=self.app_name,
+            app_link=self.app_link,
         )
         self.output_model = output_model
 

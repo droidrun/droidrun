@@ -100,6 +100,12 @@ class DroidAgentState(BaseModel):
     output_dir: str = ""
 
     # ========================================================================
+    # App Context (from Nova)
+    # ========================================================================
+    app_name: str | None = None  # Name of the app being tested
+    app_link: str | None = None  # Play Store or App Store link for the app
+
+    # ========================================================================
     # GCP Upload Results
     # ========================================================================
     video_url: str | None = None  # GCS URL to trajectory video after upload

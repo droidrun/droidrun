@@ -167,6 +167,8 @@ async def run_command(
     gcp_bucket: str | None = None,
     keep_local: bool = False,
     rich_text: bool | None = None,
+    app_name: str | None = None,
+    app_link: str | None = None,
     **kwargs,
 ) -> TestRunResult:
     """
@@ -202,6 +204,8 @@ async def run_command(
         gcp_bucket: GCP bucket name
         keep_local: Keep local trajectory files after GCP upload
         rich_text: Enable rich text console output (uses config default if not specified)
+        app_name: Name of the app being tested (for context in prompts)
+        app_link: Play Store or App Store link for the app
         **kwargs: Additional arguments passed to LLM
 
     Returns:
@@ -401,11 +405,24 @@ async def run_command(
                 except Exception as e:
                     logger.warning(f"Version check failed: {e}")
 
+            # Prepend app context to command if provided
+            full_command = command
+            if app_name or app_link:
+                app_context = ""
+                if app_name:
+                    app_context += f"App Name: {app_name}\n"
+                if app_link:
+                    app_context += f"App Link: {app_link}\n"
+                app_context += "\n"
+                full_command = app_context + command
+
             droid_agent = DroidAgent(
-                goal=command,
+                goal=full_command,
                 llms=llm,
                 config=config,
                 timeout=1000,
+                app_name=app_name,
+                app_link=app_link,
                 **droid_agent_kwargs,
             )
 
