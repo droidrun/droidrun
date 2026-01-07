@@ -61,6 +61,12 @@ The credential manager has the following secret IDs available for use with the `
 Use `type_secret(secret_id, index)` to type these secrets into input fields without exposing their values.
 {% endif %}
 
+## App Installation:
+If you need to install an app and an App Link (Play Store URL) is provided at the top of the task:
+1. Use `open_url(app_link)` to open the Play Store link directly
+2. This will open the app's Play Store page where you can tap "Install"
+3. Wait for the installation to complete before proceeding with the test
+
 ## Handling Transient UI States (Loading Screens, Transitions):
 When performing actions that trigger loading screens or transitions:
 1. **After tapping a button that triggers a process** (like "Continue", "Submit", "Sign in"), always use `wait(2)` or `wait(3)` to allow time for transitions
