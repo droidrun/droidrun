@@ -1,11 +1,17 @@
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
     from droidrun.config_manager.config_manager import DeviceConfig, ToolsConfig
     from droidrun.tools import Tools
 
+from async_adbutils import adb
+from droidrun.agent.common.events import WaitEvent
 from droidrun.agent.oneflows.app_starter_workflow import AppStarter
+from droidrun.config_manager.config_manager import ToolsConfig
+from droidrun.tools import AdbTools, IOSTools
+from droidrun.tools.tools import Tools
 
 
 async def create_tools_from_config(
@@ -24,9 +30,6 @@ async def create_tools_from_config(
     Raises:
         ValueError: If no device found or invalid platform
     """
-    from async_adbutils import adb
-    from droidrun.tools import AdbTools, IOSTools
-
     is_ios = device_config.platform.lower() == "ios"
     device_serial = device_config.serial
 
@@ -82,10 +85,6 @@ async def resolve_tools_instance(
         >>> tools_cfg = ToolsConfig(disabled_tools=["long_press"])
         >>> tools_instance, tools_cfg = resolve_tools_instance(tools_cfg, device_config)
     """
-    # Import at runtime to avoid circular imports
-    from droidrun.config_manager.config_manager import ToolsConfig
-    from droidrun.tools.tools import Tools
-
     # Case 1: Tools instance provided directly
     if isinstance(tools, Tools):
         tools_instance = tools
@@ -126,7 +125,7 @@ async def click(index: int, *, tools: "Tools" = None, **kwargs) -> str:
     """
     if tools is None:
         raise ValueError("tools parameter is required")
-    return await tools.tap_by_index(index)
+    return await tools.tap_on_index(index)
 
 
 async def long_press(index: int, *, tools: "Tools" = None, **kwargs) -> bool:
@@ -285,8 +284,6 @@ async def wait(duration: float = 1.0, *, tools: "Tools" = None, **kwargs) -> str
     """
     # Emit WaitEvent for macro recording if context available
     if tools is not None and hasattr(tools, "_ctx") and tools._ctx is not None:
-        from droidrun.agent.common.events import WaitEvent
-
         wait_event = WaitEvent(
             action_type="wait",
             description=f"Wait for {duration} seconds",
@@ -491,8 +488,6 @@ async def type_secret(
     Returns:
         Sanitized result message (NEVER includes actual secret value)
     """
-    import logging
-
     logger = logging.getLogger("droidrun")
 
     if tools is None:
@@ -532,8 +527,6 @@ async def build_credential_tools(credential_manager) -> dict:
     Returns:
         Dictionary of credential tools (empty if no credentials available)
     """
-    import logging
-
     logger = logging.getLogger("droidrun")
 
     if credential_manager is None:
@@ -570,8 +563,6 @@ async def build_custom_tools(credential_manager=None) -> dict:
     Returns:
         Dictionary of all custom tools
     """
-    import logging
-
     logger = logging.getLogger("droidrun")
 
     custom_tools = {}
@@ -603,8 +594,6 @@ async def test_open_app(mock_tools, text: str) -> str:
 
 
 async def _test_main():
-    import asyncio
-    from typing import List
 
     from llama_index.llms.google_genai import GoogleGenAI
 

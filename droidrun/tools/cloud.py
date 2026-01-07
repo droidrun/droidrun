@@ -4,6 +4,7 @@ from typing import Dict, List, Tuple
 from llama_index.core.workflow import Context
 from mobilerun import AsyncMobilerun
 from typing_extensions import Any
+from droidrun.tools.geometry import find_clear_point, rects_overlap
 
 from droidrun.tools.filters import ConciseFilter, DetailedFilter, TreeFilter
 from droidrun.tools.formatters import IndexedFormatter, TreeFormatter
@@ -104,6 +105,69 @@ class MobileRunTools(Tools):
             print(f"Error: {str(e)}")
             return False
         return True
+
+    @Tools.ui_action
+    async def tap_on_index(self, index: int) -> str:
+        """Tap at the largest visible region, avoiding overlapping elements."""
+        try:
+            def find_element_by_index(elements, target_index):
+                for item in elements:
+                    if item.get("index") == target_index:
+                        return item
+                    result = find_element_by_index(item.get("children", []), target_index)
+                    if result:
+                        return result
+                return None
+
+            def collect_all_elements(elements):
+                result = []
+                for item in elements:
+                    result.append(item)
+                    result.extend(collect_all_elements(item.get("children", [])))
+                return result
+
+            if not self.clickable_elements_cache:
+                raise ValueError("No UI elements cached. Call get_state first.")
+
+            element = find_element_by_index(self.clickable_elements_cache, index)
+            if not element:
+                raise ValueError(f"No element found with index {index}")
+
+            bounds_str = element.get("bounds")
+            if not bounds_str:
+                raise ValueError(f"Element {index} has no bounds")
+
+            target_bounds = tuple(map(int, bounds_str.split(",")))
+
+            all_elements = collect_all_elements(self.clickable_elements_cache)
+            blockers = []
+            for el in all_elements:
+                el_idx = el.get("index")
+                el_bounds_str = el.get("bounds")
+                if el_idx is not None and el_idx > index and el_bounds_str:
+                    el_bounds = tuple(map(int, el_bounds_str.split(",")))
+                    if rects_overlap(target_bounds, el_bounds):
+                        blockers.append(el_bounds)
+
+            point = find_clear_point(target_bounds, blockers)
+            if not point:
+                raise ValueError(f"Element {index} is fully obscured by overlapping elements")
+
+            x, y = point
+            await self.mobilerun.devices.actions.tap(
+                self.device_id, x=x, y=y, x_device_display_id=self.display_id
+            )
+            print(f"Tapped element with index {index} at coordinates ({x}, {y})")
+
+            response_parts = []
+            response_parts.append(f"Tapped element with index {index}")
+            response_parts.append(f"Text: '{element.get('text', 'No text')}'")
+            response_parts.append(f"Class: {element.get('className', 'Unknown class')}")
+            response_parts.append(f"Coordinates: ({x}, {y})")
+
+            return " | ".join(response_parts)
+        except Exception as e:
+            return f"Error: {str(e)}"
 
     @Tools.ui_action
     async def swipe(
