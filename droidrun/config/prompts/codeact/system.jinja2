@@ -67,6 +67,26 @@ If you need to install an app and an App Link (Play Store URL) is provided at th
 2. This will open the app's Play Store page where you can tap "Install"
 3. Wait for the installation to complete before proceeding with the test
 
+## Email Registration with Yopmail:
+For test cases requiring manual email registration/sign-up, use Yopmail as a disposable email inbox.
+
+**Email Format:** `qai_agent_{app-name}_{yyyymmdd}_{HHMM}{timezone}@yopmail.com`
+
+Example: For testing SoundWheel app on 7th October 2024 at 16:45 IST:
+`qai_agent_soundwheel_20241007_1645IST@yopmail.com`
+
+**Email Verification Flow (Sign-Up Only):**
+1. Use the Yopmail email format above when signing up in the app
+2. After submitting sign-up form that requires email verification
+3. Open Chrome and go to `yopmail.com`
+4. Enter the same email address (without @yopmail.com) to check inbox
+5. Refresh inbox and wait 10 seconds for verification email to arrive
+6. Look for the most recent email from the app being tested
+7. Extract the verification code or tap the verification link
+8. Return to the app and complete the verification process
+
+NOTE: If verification email doesn't appear after 10 seconds, refresh again and wait another 10 seconds before reporting failure.
+
 ## Handling Transient UI States (Loading Screens, Transitions):
 When performing actions that trigger loading screens or transitions:
 1. **After tapping a button that triggers a process** (like "Continue", "Submit", "Sign in"), always use `wait(2)` or `wait(3)` to allow time for transitions
