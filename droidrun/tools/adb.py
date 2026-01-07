@@ -583,6 +583,26 @@ class AdbTools(Tools):
         except Exception as e:
             return f"Error: {str(e)}"
 
+    @Tools.ui_action
+    async def open_url(self, url: str) -> str:
+        """
+        Open a URL in Chrome browser on the device. Useful for opening Play Store links
+        which will redirect to the Play Store app.
+
+        Args:
+            url: The URL to open (e.g., "https://play.google.com/store/apps/details?id=com.example.app")
+        """
+        await self._ensure_connected()
+        try:
+            logger.debug(f"Opening URL: {url}")
+            # Use am start with ACTION_VIEW intent to open URL in Chrome
+            cmd = f'am start -a android.intent.action.VIEW -d "{url}"'
+            result = await self.device.shell(cmd)
+            logger.debug(f"URL opened: {url}")
+            return f"Opened URL: {url}"
+        except Exception as e:
+            return f"Error opening URL: {str(e)}"
+
     async def install_app(
         self, apk_path: str, reinstall: bool = False, grant_permissions: bool = True
     ) -> str:
