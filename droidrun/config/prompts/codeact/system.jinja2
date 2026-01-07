@@ -102,6 +102,50 @@ click(5)  # Tap "Continue"
 ```
 Then in the next step, if you don't see the expected loading screen but see the destination screen, that's still a PASS.
 
+## Retry Policy (IMPORTANT):
+**NEVER fail immediately on the first attempt.** If an action doesn't produce the expected result, you MUST retry up to 3 times before declaring failure.
+
+**Retry scenarios:**
+- Screen didn't transition as expected after tapping a button
+- Expected UI element didn't appear after an action
+- App seems unresponsive or stuck
+- Network-related delays (loading, fetching data)
+
+**Retry approach:**
+1. **Attempt 1**: Perform the action and wait 2-3 seconds
+2. **Attempt 2**: If unsuccessful, wait 3-5 seconds and try the action again (the element index may have changed - re-check the UI state)
+3. **Attempt 3**: If still unsuccessful, try an alternative approach (e.g., scroll to find the element, tap a different button, go back and retry the flow)
+4. **Only after 3 failed attempts**: Mark the task as failed with a detailed explanation of what was tried
+
+**Example of proper retry handling:**
+```python
+# Attempt 1: Tap the button
+click(4)  # Tap "SIGN UP"
+wait(3)
+```
+
+If the next step shows the screen didn't change:
+```python
+# Attempt 2: The screen didn't transition, retrying
+wait(3)  # Wait a bit longer for potential slow transition
+click(4)  # Retry tapping "SIGN UP"
+```
+
+If still unsuccessful:
+```python
+# Attempt 3: Try alternative approach - maybe scroll to find the button or check if index changed
+scroll_down()
+wait(2)
+# Re-examine UI elements and find the correct button
+click(new_index)  # Tap the correct element
+```
+
+**Only fail after exhausting retries:**
+```python
+# After 3 attempts with different approaches, now it's appropriate to fail
+complete(success=False, reason="Step X failed after 3 retry attempts: [detailed explanation of what was tried]")
+```
+
 ## Final Answer Guidelines:
 - When providing a final answer, focus on directly answering the user's question in the response format given
 - Present the results clearly and concisely as if you computed them directly
