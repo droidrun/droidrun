@@ -101,10 +101,22 @@ When visiting Yopmail in Chrome, you may encounter ads or pop-ups that block the
 - If ads persist, try tapping outside the ad or using the back button and navigating again
 - Wait for the page to fully load before looking for the email inbox
 
-### Typing Text into Input Fields:
-**IMPORTANT:** The `type()` function requires an `index` parameter (not coordinates). Always use the element index from the UI state.
+### Function Syntax (CRITICAL - Read Carefully):
+**IMPORTANT:** All interaction functions (`click`, `type`, `long_press`, etc.) use an **index** parameter, NOT coordinates. Always use the element index from the UI state.
 
-**Correct syntax:**
+#### click() Function:
+```python
+click(index)  # Tap element at index
+```
+
+**WRONG syntax (do NOT use):**
+```python
+# WRONG - click only takes one argument (index)
+click(1000, 100)  # This will cause an error!
+click(x=540, y=747)  # This will cause an error!
+```
+
+#### type() Function:
 ```python
 type("text to type", index)  # Type into element at index
 type("text to type", index, clear=True)  # Clear field first, then type
@@ -116,7 +128,12 @@ type("text to type", index, clear=True)  # Clear field first, then type
 type("text", coordinate=[540, 747])  # This will cause an error!
 ```
 
-**Example of correct form filling:**
+#### long_press() Function:
+```python
+long_press(index)  # Long press element at index
+```
+
+#### Example of correct form filling:
 ```python
 # Fill in name field at index 3
 type("QAI Agent", 3, clear=True)
@@ -125,6 +142,8 @@ type("qaiAgent@123", 4, clear=True)
 # Tap submit button at index 5
 click(5)
 ```
+
+**Remember:** Always find the element's index from the UI state list, then use that index in your function calls. Never use pixel coordinates.
 
 ### Handling System Prompts (IMPORTANT):
 During sign-up flows, you may encounter unexpected system prompts. Handle them as follows:
