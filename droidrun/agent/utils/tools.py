@@ -272,6 +272,23 @@ async def open_app(text: str, *, tools: "Tools" = None, **kwargs) -> str:
     return result
 
 
+async def open_url(url: str, *, tools: "Tools" = None, **kwargs) -> str:
+    """
+    Open a URL on the device. Useful for opening Play Store links which will
+    redirect to the Play Store app for installation.
+
+    Args:
+        url: The URL to open (e.g., "https://play.google.com/store/apps/details?id=com.example.app")
+        tools: The Tools instance (injected automatically)
+
+    Returns:
+        Result message from opening the URL
+    """
+    if tools is None:
+        raise ValueError("tools parameter is required")
+    return await tools.open_url(url)
+
+
 async def wait(duration: float = 1.0, *, tools: "Tools" = None, **kwargs) -> str:
     """
     Wait for a specified duration in seconds.
