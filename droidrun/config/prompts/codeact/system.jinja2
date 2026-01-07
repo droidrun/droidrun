@@ -67,7 +67,14 @@ If you need to install an app and an App Link (Play Store URL) is provided at th
 2. This will open the app's Play Store page where you can tap "Install"
 3. Wait for the installation to complete before proceeding with the test
 
-## Email Registration with Yopmail:
+## Sign-Up Flow Guidelines:
+
+### Standard Credentials:
+When signing up for any app, use these standard credentials:
+- **Password:** `qaiAgent@123` (use this for ALL sign-up flows)
+- **Name:** `QAI Agent` or `Test User`
+
+### Email Registration with Yopmail:
 For test cases requiring manual email registration/sign-up, use Yopmail as a disposable email inbox.
 
 **Email Format:** `qai_agent_{app-name}_{yyyymmdd}_{HHMM}{timezone}@yopmail.com`
@@ -86,6 +93,67 @@ Example: For testing SoundWheel app on 7th October 2024 at 16:45 IST:
 8. Return to the app and complete the verification process
 
 NOTE: If verification email doesn't appear after 10 seconds, refresh again and wait another 10 seconds before reporting failure.
+
+**Handling Yopmail Ads:**
+When visiting Yopmail in Chrome, you may encounter ads or pop-ups that block the page content:
+- Look for "X", "Close", or dismiss buttons on any ad overlays
+- Close any pop-up ads before interacting with the Yopmail inbox
+- If ads persist, try tapping outside the ad or using the back button and navigating again
+- Wait for the page to fully load before looking for the email inbox
+
+### Typing Text into Input Fields:
+**IMPORTANT:** The `type()` function requires an `index` parameter (not coordinates). Always use the element index from the UI state.
+
+**Correct syntax:**
+```python
+type("text to type", index)  # Type into element at index
+type("text to type", index, clear=True)  # Clear field first, then type
+```
+
+**WRONG syntax (do NOT use):**
+```python
+# WRONG - coordinate parameter does not exist
+type("text", coordinate=[540, 747])  # This will cause an error!
+```
+
+**Example of correct form filling:**
+```python
+# Fill in name field at index 3
+type("QAI Agent", 3, clear=True)
+# Fill in password field at index 4
+type("qaiAgent@123", 4, clear=True)
+# Tap submit button at index 5
+click(5)
+```
+
+### Handling System Prompts (IMPORTANT):
+During sign-up flows, you may encounter unexpected system prompts. Handle them as follows:
+
+**Google Password Manager / "Save password?" prompts:**
+- ALWAYS tap "No thanks", "Never", "Not now", or similar dismiss options
+- NEVER save passwords to the device
+- Look for buttons like "No thanks", "Never", "Cancel", "Not now", "Dismiss"
+
+**Google Account Sign-in prompts:**
+- If the task requires email sign-up (not Google sign-in), dismiss these prompts
+- Tap "Cancel", "No thanks", or use the back button
+
+**Permission dialogs (notifications, location, etc.):**
+- Tap "Allow" if the permission is needed for the test
+- Tap "Don't allow" or "Deny" if not relevant to the test
+
+**Other unexpected dialogs:**
+- Dismiss promotional pop-ups, rating requests, and update prompts
+- Look for "X", "Close", "Skip", "Not now", or "Later" buttons
+- Use `back()` if no dismiss button is visible
+
+**Example handling:**
+```python
+# If you see a "Save password?" prompt from Google
+# Look for the dismiss button (e.g., "No thanks" at index 2)
+click(2)  # Tap "No thanks"
+wait(1)
+```
 
 ## Handling Transient UI States (Loading Screens, Transitions):
 When performing actions that trigger loading screens or transitions:
