@@ -1,10 +1,12 @@
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from droidrun.config_manager.config_manager import DeviceConfig, ToolsConfig
     from droidrun.tools import Tools
+
+from droidrun.config_manager import ClickMode
 
 from async_adbutils import adb
 from droidrun.agent.common.events import WaitEvent
@@ -54,6 +56,7 @@ async def resolve_tools_instance(
     tools_config_fallback: "ToolsConfig | None" = None,
     credential_manager=None,
     vision_enabled: bool = True,
+    click_mode: Optional[ClickMode] = None,
 ) -> tuple["Tools", "ToolsConfig"]:
     """
     Resolve Tools instance and ToolsConfig from various input types.
@@ -69,6 +72,7 @@ async def resolve_tools_instance(
         tools_config_fallback: Fallback ToolsConfig when tools is a Tools instance or None
         credential_manager: Optional credential manager to attach to Tools
         vision_enabled: Whether vision is enabled (default: True)
+        click_mode: Click mode for formatter selection (default: INDEX)
 
     Returns:
         Tuple of (tools_instance, tools_config):
@@ -85,9 +89,20 @@ async def resolve_tools_instance(
         >>> tools_cfg = ToolsConfig(disabled_tools=["long_press"])
         >>> tools_instance, tools_cfg = resolve_tools_instance(tools_cfg, device_config)
     """
+    from droidrun.tools.formatters import IndexedFormatter, CoordinateFormatter
+
+    # Select formatter based on click_mode
+    if click_mode in (ClickMode.COORDINATE, ClickMode.HYBRID):
+        tree_formatter = CoordinateFormatter()
+    else:
+        tree_formatter = IndexedFormatter()
+
     # Case 1: Tools instance provided directly
     if isinstance(tools, Tools):
         tools_instance = tools
+        # Update formatter if not already set appropriately
+        if hasattr(tools_instance, 'tree_formatter'):
+            tools_instance.tree_formatter = tree_formatter
         # Use fallback or default ToolsConfig
         tools_cfg = tools_config_fallback if tools_config_fallback else ToolsConfig()
 
@@ -96,6 +111,7 @@ async def resolve_tools_instance(
         tools_instance = await create_tools_from_config(
             device_config, vision_enabled=vision_enabled
         )
+        tools_instance.tree_formatter = tree_formatter
         tools_cfg = tools
 
     # Case 3: None provided
@@ -103,6 +119,7 @@ async def resolve_tools_instance(
         tools_instance = await create_tools_from_config(
             device_config, vision_enabled=vision_enabled
         )
+        tools_instance.tree_formatter = tree_formatter
         tools_cfg = tools_config_fallback if tools_config_fallback else ToolsConfig()
 
     # Attach credential manager if provided
@@ -331,6 +348,55 @@ async def complete(
 
 
 # =============================================================================
+# COORDINATE-BASED CLICK ACTIONS
+# =============================================================================
+
+
+async def click_at(x: int, y: int, *, tools: "Tools" = None, **kwargs) -> str:
+    """
+    Click at normalized coordinates [0-1000].
+
+    This action allows precise clicking at any position on the screen
+    using normalized coordinates, independent of screen resolution.
+
+    Args:
+        x: Normalized X coordinate [0-1000], where 0 is left edge and 1000 is right edge
+        y: Normalized Y coordinate [0-1000], where 0 is top edge and 1000 is bottom edge
+        tools: The Tools instance (injected automatically)
+
+    Returns:
+        Result message from the tap operation
+    """
+    if tools is None:
+        raise ValueError("tools parameter is required")
+    return await tools.tap_by_normalized_coordinate(x, y)
+
+
+async def click_area(
+    x1: int, y1: int, x2: int, y2: int, *, tools: "Tools" = None, **kwargs
+) -> str:
+    """
+    Click at the center of a normalized area [0-1000].
+
+    This action calculates the center point of the given area and clicks there.
+    Useful when you want to click on an element but don't need pixel-precise accuracy.
+
+    Args:
+        x1: Top-left X coordinate [0-1000]
+        y1: Top-left Y coordinate [0-1000]
+        x2: Bottom-right X coordinate [0-1000]
+        y2: Bottom-right Y coordinate [0-1000]
+        tools: The Tools instance (injected automatically)
+
+    Returns:
+        Result message from the tap operation
+    """
+    if tools is None:
+        raise ValueError("tools parameter is required")
+    return await tools.tap_normalized_area(x1, y1, x2, y2)
+
+
+# =============================================================================
 # ATOMIC ACTION SIGNATURES - Single source of truth for both Executor and CodeAct
 # =============================================================================
 
@@ -365,16 +431,26 @@ ATOMIC_ACTION_SIGNATURES = {
         "description": 'Wait for a specified duration in seconds. Useful for waiting for animations, page loads, or other time-based operations. Usage Example: {"action": "wait", "duration": 2.0}',
         "function": wait,
     },
-    # "copy": {
-    #     "arguments": ["text"],
-    #     "description": "Copy the specified text to the clipboard. Provide the text to copy using the 'text' argument. Example: {\"action\": \"copy\", \"text\": \"the text you want to copy\"}\nAlways use copy action to copy text to clipboard."
-    #     "function": copy,
-    # },
-    # "paste": {
-    #     "arguments": ["index", "clear"],
-    #     "description": "Paste clipboard text into a text box. 'index' specifies which text box to focus on and paste into. Set 'clear' to true to clear existing text before pasting. Example: {\"action\": \"paste\", \"index\": 0, \"clear\": true}\nAlways use paste action to paste text from clipboard."
-    #     "function": paste,
-    # },
+}
+
+# Index-based click actions (require element index from a11y tree)
+INDEX_CLICK_ACTIONS = {
+    "click": ATOMIC_ACTION_SIGNATURES["click"],
+    "long_press": ATOMIC_ACTION_SIGNATURES["long_press"],
+}
+
+# Coordinate-based click actions (use normalized coordinates [0-1000])
+COORDINATE_CLICK_ACTIONS = {
+    "click_at": {
+        "arguments": ["x", "y"],
+        "description": 'Click at normalized coordinates [0-1000]. x=0 is left edge, x=1000 is right edge; y=0 is top, y=1000 is bottom. Use this for precise clicking based on visual position. Usage Example: {"action": "click_at", "x": 500, "y": 300}',
+        "function": click_at,
+    },
+    "click_area": {
+        "arguments": ["x1", "y1", "x2", "y2"],
+        "description": 'Click at the center of a normalized area [0-1000]. Useful when targeting an element region. Usage Example: {"action": "click_area", "x1": 100, "y1": 200, "x2": 300, "y2": 400}',
+        "function": click_area,
+    },
 }
 
 
@@ -383,22 +459,64 @@ ATOMIC_ACTION_SIGNATURES = {
 # =============================================================================
 
 
-def filter_atomic_actions(disabled_tools: List[str]) -> Dict[str, Any]:
+def get_click_actions_for_mode(click_mode: ClickMode) -> Dict[str, Any]:
     """
-    Filter ATOMIC_ACTION_SIGNATURES by removing disabled tools.
+    Get click-related actions based on click mode.
+
+    Args:
+        click_mode: The click mode (INDEX, COORDINATE, or HYBRID)
+
+    Returns:
+        Dict of click action signatures appropriate for the mode
+    """
+    if click_mode == ClickMode.INDEX:
+        result = INDEX_CLICK_ACTIONS.copy()
+    elif click_mode == ClickMode.COORDINATE:
+        result = COORDINATE_CLICK_ACTIONS.copy()
+    elif click_mode == ClickMode.HYBRID:
+        # Hybrid mode includes both index and coordinate actions
+        result = INDEX_CLICK_ACTIONS.copy()
+        result.update(COORDINATE_CLICK_ACTIONS)
+    else:
+        # Default to index mode
+        result = INDEX_CLICK_ACTIONS.copy()
+    return result
+
+
+def filter_atomic_actions(
+    disabled_tools: List[str],
+    click_mode: Optional[ClickMode] = None,
+) -> Dict[str, Any]:
+    """
+    Filter ATOMIC_ACTION_SIGNATURES by removing disabled tools and applying click mode.
 
     Args:
         disabled_tools: List of tool names to exclude. Empty list = all tools enabled.
+        click_mode: Click mode to determine which click actions to include.
+                   If None, defaults to INDEX mode (backward compatible).
 
     Returns:
         Filtered dict of atomic action signatures.
     """
-    if not disabled_tools:
-        return ATOMIC_ACTION_SIGNATURES.copy()
-
-    return {
-        k: v for k, v in ATOMIC_ACTION_SIGNATURES.items() if k not in disabled_tools
+    # Start with base actions (excluding click/long_press which are mode-dependent)
+    base_actions = {
+        k: v for k, v in ATOMIC_ACTION_SIGNATURES.items()
+        if k not in INDEX_CLICK_ACTIONS
     }
+
+    # Add click actions based on mode
+    if click_mode is None:
+        click_mode = ClickMode.INDEX
+    click_actions = get_click_actions_for_mode(click_mode)
+
+    # Combine base and click actions
+    all_actions = {**base_actions, **click_actions}
+
+    # Apply disabled tools filter
+    if not disabled_tools:
+        return all_actions
+
+    return {k: v for k, v in all_actions.items() if k not in disabled_tools}
 
 
 def filter_custom_tools(
@@ -424,15 +542,28 @@ def filter_custom_tools(
     return {k: v for k, v in custom_tools.items() if k not in disabled_tools}
 
 
-def get_atomic_tool_descriptions() -> str:
+def get_atomic_tool_descriptions(
+    click_mode: Optional[ClickMode] = None,
+    disabled_tools: Optional[List[str]] = None,
+) -> str:
     """
     Get formatted tool descriptions for CodeAct system prompt.
+
+    Args:
+        click_mode: Click mode to determine which click actions to include.
+                   If None, defaults to INDEX mode.
+        disabled_tools: List of tool names to exclude.
 
     Returns:
         Formatted string of tool descriptions for LLM prompt
     """
+    actions = filter_atomic_actions(
+        disabled_tools or [],
+        click_mode=click_mode,
+    )
+
     descriptions = []
-    for action_name, signature in ATOMIC_ACTION_SIGNATURES.items():
+    for action_name, signature in actions.items():
         args = ", ".join(signature["arguments"])
         desc = signature["description"]
         descriptions.append(f"- {action_name}({args}): {desc}")

@@ -162,30 +162,30 @@ class CodeActAgent(Workflow):
 
     async def _build_system_prompt(self) -> dict:
         """Build system prompt message."""
+        # Determine click mode for template context
+        click_mode = getattr(self.agent_config, 'click_mode', None)
+        click_mode_str = click_mode.value if click_mode else "index"
+        
+        template_context = {
+            "tool_descriptions": self.tool_descriptions,
+            "available_secrets": self._available_secrets,
+            "variables": (
+                self.shared_state.custom_variables if self.shared_state else {}
+            ),
+            "output_schema": self._output_schema,
+            "click_mode": click_mode_str,
+        }
+        
         custom_system_prompt = self.prompt_resolver.get_prompt("codeact_system")
         if custom_system_prompt:
             system_text = PromptLoader.render_template(
                 custom_system_prompt,
-                {
-                    "tool_descriptions": self.tool_descriptions,
-                    "available_secrets": self._available_secrets,
-                    "variables": (
-                        self.shared_state.custom_variables if self.shared_state else {}
-                    ),
-                    "output_schema": self._output_schema,
-                },
+                template_context,
             )
         else:
             system_text = await PromptLoader.load_prompt(
                 self.agent_config.get_codeact_system_prompt_path(),
-                {
-                    "tool_descriptions": self.tool_descriptions,
-                    "available_secrets": self._available_secrets,
-                    "variables": (
-                        self.shared_state.custom_variables if self.shared_state else {}
-                    ),
-                    "output_schema": self._output_schema,
-                },
+                template_context,
             )
         return {"role": "system", "content": [{"text": system_text}]}
 

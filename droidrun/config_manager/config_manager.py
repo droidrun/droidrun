@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 import yaml
 
 from droidrun.config_manager.path_resolver import PathResolver
 from droidrun.config_manager.safe_execution import SafeExecutionConfig
+
+
+class ClickMode(str, Enum):
+    """
+    Click mode enumeration.
+    
+    Attributes:
+        INDEX: Index-based click - LLM outputs element index, system calculates center point
+        COORDINATE: Coordinate-based click - LLM outputs normalized coordinates [0-1000]
+        HYBRID: Hybrid mode - Both index and coordinate click methods available
+    """
+    INDEX = "index"
+    COORDINATE = "coordinate"
+    HYBRID = "hybrid"
 
 
 # ---------- Config Schema ----------
@@ -97,6 +112,7 @@ class AgentConfig:
     after_sleep_action: float = 1.0
     wait_for_stable_ui: float = 0.3
     prompts_dir: str = "config/prompts"
+    click_mode: ClickMode = ClickMode.INDEX
 
     codeact: CodeActConfig = field(default_factory=CodeActConfig)
     manager: ManagerConfig = field(default_factory=ManagerConfig)
@@ -301,6 +317,13 @@ class DroidrunConfig:
             AppCardConfig(**app_cards_data) if app_cards_data else AppCardConfig()
         )
 
+        # Parse click_mode (string -> ClickMode enum)
+        click_mode_str = agent_data.get("click_mode", "index")
+        try:
+            click_mode = ClickMode(click_mode_str)
+        except ValueError:
+            click_mode = ClickMode.INDEX
+
         agent_config = AgentConfig(
             max_steps=agent_data.get("max_steps", 15),
             reasoning=agent_data.get("reasoning", False),
@@ -308,6 +331,7 @@ class DroidrunConfig:
             after_sleep_action=agent_data.get("after_sleep_action", 1.0),
             wait_for_stable_ui=agent_data.get("wait_for_stable_ui", 0.3),
             prompts_dir=agent_data.get("prompts_dir", "config/prompts"),
+            click_mode=click_mode,
             codeact=codeact_config,
             manager=manager_config,
             executor=executor_config,

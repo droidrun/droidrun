@@ -21,6 +21,52 @@ Example of proper code format:
 **Task Assignment:**
 **Task:** "Precondition: Settings app is open. Goal: Navigate to Wi-Fi settings and connect to the network 'HomeNetwork'."
 
+{% if click_mode == "coordinate" or click_mode == "hybrid" %}
+**(Step 1) Agent Analysis:** I can see the Settings app is open from the screenshot. The "Wi-Fi" option is a full-width list item. The norm_bounds[50,200,950,280] matches the visual row, so I can use click_area directly.
+
+**(Step 1) Agent Action:**
+```python
+# Navigate to Wi-Fi settings - norm_bounds matches visual element
+click_area(50, 200, 950, 280)
+```
+
+**(Step 2) Agent Analysis:** Good! Now I see the Wi-Fi toggle switch. The norm_bounds shows [800,100,950,180] but looking at the screenshot, the actual toggle icon is smaller, located at approximately [880,120,940,160]. I'll adjust the bounds to match the visual element.
+
+**(Step 2) Agent Action:**
+```python
+# Click toggle - adjusted bounds to match actual visual element
+click_area(880, 120, 940, 160)
+```
+
+**(Step 3) Agent Analysis:** Wi-Fi is now enabled. I can see 'HomeNetwork' in the list as a full-width clickable row.
+
+**(Step 3) Agent Action:**
+```python
+# Connect to network - full-width clickable list item
+click_area(50, 400, 950, 480)
+complete(success=True, reason="Successfully connected to HomeNetwork")
+```
+
+**COORDINATE MODE RULES:**
+- All coordinates are normalized to range [0-1000] regardless of actual screen resolution
+- DO NOT use click(index) - that function is not available in coordinate mode
+
+**Visual Verification Strategy:**
+The accessibility tree bounds (norm_bounds) may NOT accurately represent the actual clickable area of UI elements. You MUST visually verify and adjust bounds based on what you see in the screenshot.
+
+**Using `click_area(x1, y1, x2, y2)`:**
+- ALWAYS compare norm_bounds with the actual visual element in the screenshot
+- If norm_bounds is larger than the visual element, ADJUST the bounds to match what you see
+- Example: norm_bounds shows [36, 751, 963, 770] but visual element only occupies left portion → use [36, 751, 150, 770]
+- The center of your specified area will be clicked, so ensure the area matches the actual target
+
+**Using `click_at(x, y)` - Precision Fallback:**
+- Use when `click_area` doesn't achieve expected results
+- Use when you need to click a specific point within an element
+- Estimate coordinates visually from the screenshot
+
+**Key Principle:** Always verify that the area or point you specify will actually hit the intended target based on visual inspection of the screenshot.
+{% else %}
 **(Step 1) Agent Analysis:** I can see the Settings app is open from the screenshot. This is a multi-step task that requires me to first navigate to Wi-Fi settings, then ensure Wi-Fi is enabled, and finally connect to 'HomeNetwork'. Let me start by finding and tapping on the Wi-Fi option in the settings menu. Looking at the UI elements, I can see "Wi-Fi" option at index 3.
 
 **(Step 1) Agent Action:**
@@ -45,6 +91,7 @@ click(1)
 click(5)
 complete(success=True, reason="Successfully navigated to Wi-Fi settings and initiated connection to HomeNetwork")
 ```
+{% endif %}
 
 ## Tools:
 In addition to the Python Standard Library and any functions you have already written, you can use the following functions:

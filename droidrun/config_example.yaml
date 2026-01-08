@@ -15,6 +15,11 @@ agent:
   wait_for_stable_ui: 0.3
   # Base directory for prompt templates
   prompts_dir: config/prompts
+  # Click mode: index (element index), coordinate (normalized [0-1000]), or hybrid (both)
+  # - index: LLM outputs element index from a11y tree, system clicks center
+  # - coordinate: LLM outputs normalized coordinates, enables precise visual clicking
+  # - hybrid: Both index and coordinate click methods available
+  click_mode: index
 
   # CodeAct Agent Configuration
   codeact:
@@ -228,15 +233,22 @@ safe_execution:
 # === Tool Settings ===
 tools:
   # Disabled tools - add tool names to disable them
-  # Available tools:
-  #   - click          # Tap UI elements by index
-  #   - long_press     # Long press UI elements
-  #   - type           # Type text into input fields
-  #   - system_button  # Press back, home, enter
-  #   - swipe          # Swipe gestures
-  #   - wait           # Wait for duration
-  #   - open_app       # Open apps by name
-  #   - type_secret    # Type credentials (requires credentials.enabled: true)
+  # Available tools (varies by click_mode):
+  #   Index mode (click_mode: index):
+  #     - click          # Tap UI elements by index
+  #     - long_press     # Long press UI elements by index
+  #   Coordinate mode (click_mode: coordinate):
+  #     - click_at       # Tap at normalized coordinates [0-1000]
+  #     - click_area     # Tap center of normalized area [0-1000]
+  #   Hybrid mode (click_mode: hybrid):
+  #     All above click tools available
+  #   Common tools (all modes):
+  #     - type           # Type text into input fields
+  #     - system_button  # Press back, home, enter
+  #     - swipe          # Swipe gestures
+  #     - wait           # Wait for duration
+  #     - open_app       # Open apps by name
+  #     - type_secret    # Type credentials (requires credentials.enabled: true)
   disabled_tools: []
 
 # === Credential Settings ===

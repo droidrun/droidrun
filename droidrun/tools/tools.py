@@ -65,9 +65,37 @@ class Tools(ABC):
         """
         pass
 
-    # @abstractmethod
-    # async def tap_by_coordinates(self, x: int, y: int) -> bool:
-    #    pass
+    @abstractmethod
+    async def tap_by_normalized_coordinate(self, norm_x: int, norm_y: int) -> str:
+        """
+        Tap at normalized coordinates [0-1000].
+        
+        Args:
+            norm_x: Normalized X coordinate [0-1000]
+            norm_y: Normalized Y coordinate [0-1000]
+            
+        Returns:
+            Result message
+        """
+        pass
+
+    @abstractmethod
+    async def tap_normalized_area(
+        self, x1: int, y1: int, x2: int, y2: int
+    ) -> str:
+        """
+        Tap at the center of a normalized area [0-1000].
+        
+        Args:
+            x1: Top-left X coordinate [0-1000]
+            y1: Top-left Y coordinate [0-1000]
+            x2: Bottom-right X coordinate [0-1000]
+            y2: Bottom-right Y coordinate [0-1000]
+            
+        Returns:
+            Result message
+        """
+        pass
 
     @abstractmethod
     async def swipe(

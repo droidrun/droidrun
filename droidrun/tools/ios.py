@@ -332,6 +332,56 @@ class IOSTools(Tools):
         """
         return self.tap_by_index(index)
 
+    async def tap_by_normalized_coordinate(self, norm_x: int, norm_y: int) -> str:
+        """
+        Tap at normalized coordinates [0-1000].
+
+        Note: iOS implementation uses screen coordinates directly.
+
+        Args:
+            norm_x: Normalized X coordinate [0-1000]
+            norm_y: Normalized Y coordinate [0-1000]
+
+        Returns:
+            Result message
+        """
+        # TODO: Implement proper coordinate conversion for iOS
+        # For now, use a simple conversion assuming standard iOS screen size
+        screen_width = 390  # iPhone 14 Pro width
+        screen_height = 844  # iPhone 14 Pro height
+        abs_x = int(norm_x * screen_width / 1000)
+        abs_y = int(norm_y * screen_height / 1000)
+
+        # Format rect in iOS format: {{x,y},{w,h}}
+        ios_rect = f"{{{{{abs_x},{abs_y}}},{{{1},{1}}}}}"
+        tap_url = f"{self.url}/gestures/tap"
+        payload = {"rect": ios_rect, "count": 1, "longPress": False}
+
+        response = requests.post(tap_url, json=payload)
+        if response.status_code == 200:
+            return f"Tapped at normalized ({norm_x}, {norm_y}) -> absolute ({abs_x}, {abs_y})"
+        else:
+            return f"Error: Failed to tap. HTTP {response.status_code}"
+
+    async def tap_normalized_area(
+        self, x1: int, y1: int, x2: int, y2: int
+    ) -> str:
+        """
+        Tap at the center of a normalized area [0-1000].
+
+        Args:
+            x1: Top-left X coordinate [0-1000]
+            y1: Top-left Y coordinate [0-1000]
+            x2: Bottom-right X coordinate [0-1000]
+            y2: Bottom-right Y coordinate [0-1000]
+
+        Returns:
+            Result message
+        """
+        center_norm_x = (x1 + x2) // 2
+        center_norm_y = (y1 + y2) // 2
+        return await self.tap_by_normalized_coordinate(center_norm_x, center_norm_y)
+
     def swipe(
         self, start_x: int, start_y: int, end_x: int, end_y: int, duration_ms: int = 300
     ) -> bool:

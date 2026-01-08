@@ -1,6 +1,7 @@
 from droidrun.config_manager.config_manager import (
     AgentConfig,
     AppCardConfig,
+    ClickMode,
     CodeActConfig,
     CredentialsConfig,
     DeviceConfig,
@@ -29,6 +30,7 @@ __all__ = [
     "LLMProfile",
     # Agent configs
     "AgentConfig",
+    "ClickMode",
     "CodeActConfig",
     "ManagerConfig",
     "ExecutorConfig",

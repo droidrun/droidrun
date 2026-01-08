@@ -18,6 +18,11 @@ from droidrun.agent.common.events import (
 )
 from droidrun.tools.tools import Tools
 from droidrun.tools.geometry import find_clear_point, rects_overlap
+from droidrun.tools.coordinate import (
+    ScreenSize,
+    normalized_to_absolute,
+    normalized_area_to_center,
+)
 
 from droidrun.tools.portal_client import PortalClient
 from async_adbutils import adb
@@ -97,6 +102,7 @@ class AdbTools(Tools):
         # Caches
         self.raw_tree_cache = None
         self.filtered_tree_cache = None
+        self._screen_size: ScreenSize = None
 
     async def connect(self) -> None:
         """
@@ -339,6 +345,99 @@ class AdbTools(Tools):
         except ValueError as e:
             logger.debug(f"Error: {str(e)}")
             return False
+
+    @Tools.ui_action
+    async def tap_by_normalized_coordinate(self, norm_x: int, norm_y: int) -> str:
+        """
+        Tap at normalized coordinates [0-1000].
+
+        This method converts normalized coordinates to absolute pixel coordinates
+        based on the current screen size and performs a tap action.
+
+        Args:
+            norm_x: Normalized X coordinate [0-1000]
+            norm_y: Normalized Y coordinate [0-1000]
+
+        Returns:
+            Result message describing the tap action
+        """
+        await self._ensure_connected()
+        try:
+            # Get screen size from cached device context
+            if not hasattr(self, '_screen_size') or self._screen_size is None:
+                # Fallback: trigger get_state to populate screen size
+                await self.get_state()
+
+            abs_x, abs_y = normalized_to_absolute(norm_x, norm_y, self._screen_size)
+
+            await self.device.click(abs_x, abs_y)
+            print(f"Tapped at normalized ({norm_x}, {norm_y}) -> absolute ({abs_x}, {abs_y})")
+
+            # Emit tap event for trajectory recording
+            if self._ctx:
+                tap_event = TapActionEvent(
+                    action_type="tap_coordinate",
+                    description=f"Tap at normalized ({norm_x}, {norm_y}) -> absolute ({abs_x}, {abs_y})",
+                    x=abs_x,
+                    y=abs_y,
+                    element_index=-1,
+                    element_text=f"norm:({norm_x},{norm_y})",
+                    element_bounds="",
+                )
+                self._ctx.write_event_to_stream(tap_event)
+
+            return f"Tapped at normalized ({norm_x}, {norm_y}) -> absolute ({abs_x}, {abs_y})"
+
+        except ValueError as e:
+            return f"Error: {str(e)}"
+
+    @Tools.ui_action
+    async def tap_normalized_area(
+        self, x1: int, y1: int, x2: int, y2: int
+    ) -> str:
+        """
+        Tap at the center of a normalized area [0-1000].
+
+        This method calculates the center point of the given normalized area
+        and performs a tap action at that location.
+
+        Args:
+            x1: Top-left X coordinate [0-1000]
+            y1: Top-left Y coordinate [0-1000]
+            x2: Bottom-right X coordinate [0-1000]
+            y2: Bottom-right Y coordinate [0-1000]
+
+        Returns:
+            Result message describing the tap action
+        """
+        await self._ensure_connected()
+        try:
+            # Get screen size from cached device context
+            if not hasattr(self, '_screen_size') or self._screen_size is None:
+                await self.get_state()
+
+            abs_x, abs_y = normalized_area_to_center(x1, y1, x2, y2, self._screen_size)
+
+            await self.device.click(abs_x, abs_y)
+            print(f"Tapped area center [{x1},{y1},{x2},{y2}] -> absolute ({abs_x}, {abs_y})")
+
+            # Emit tap event for trajectory recording
+            if self._ctx:
+                tap_event = TapActionEvent(
+                    action_type="tap_area",
+                    description=f"Tap area center [{x1},{y1},{x2},{y2}] -> ({abs_x}, {abs_y})",
+                    x=abs_x,
+                    y=abs_y,
+                    element_index=-1,
+                    element_text=f"area:[{x1},{y1},{x2},{y2}]",
+                    element_bounds=f"{x1},{y1},{x2},{y2}",
+                )
+                self._ctx.write_event_to_stream(tap_event)
+
+            return f"Tapped area center [{x1},{y1},{x2},{y2}] -> absolute ({abs_x}, {abs_y})"
+
+        except ValueError as e:
+            return f"Error: {str(e)}"
 
     # Replace the old tap function with the new one
     async def tap(self, index: int) -> str:
@@ -846,6 +945,11 @@ class AdbTools(Tools):
                     raise Exception(f"Missing data in state: {', '.join(missing_keys)}")
 
                 self.raw_tree_cache = combined_data["a11y_tree"]
+
+                # Cache screen size for coordinate conversion
+                self._screen_size = ScreenSize.from_device_context(
+                    combined_data["device_context"]
+                )
 
                 self.filtered_tree_cache = self.tree_filter.filter(
                     self.raw_tree_cache, combined_data["device_context"]

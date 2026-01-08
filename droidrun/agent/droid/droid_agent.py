@@ -263,7 +263,11 @@ class DroidAgent(Workflow):
         )
         self.trajectory_writer = TrajectoryWriter(queue_size=300)
 
-        self.atomic_tools = ATOMIC_ACTION_SIGNATURES.copy()
+        # Initialize atomic tools based on click_mode
+        self.atomic_tools = filter_atomic_actions(
+            disabled_tools=[],
+            click_mode=self.config.agent.click_mode,
+        )
 
         # Store user custom tools, will build auto tools (credentials + open_app)
         self.user_custom_tools = custom_tools or {}
@@ -470,7 +474,10 @@ class DroidAgent(Workflow):
             else []
         )
 
-        self.atomic_tools = filter_atomic_actions(disabled_tools)
+        self.atomic_tools = filter_atomic_actions(
+            disabled_tools,
+            click_mode=self.config.agent.click_mode,
+        )
         filtered_custom = filter_custom_tools(
             {**auto_custom_tools, **self.user_custom_tools},
             disabled_tools,
@@ -491,6 +498,7 @@ class DroidAgent(Workflow):
                 tools_config_fallback=self.config.tools,
                 credential_manager=self.credential_manager,
                 vision_enabled=vision_enabled,
+                click_mode=self.config.agent.click_mode,
             )
 
             self.tools_instance = tools_instance
