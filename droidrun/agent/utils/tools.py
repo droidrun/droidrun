@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from droidrun.config_manager.config_manager import DeviceConfig, ToolsConfig
     from droidrun.tools import Tools
 
-from droidrun.config_manager import ClickMode
+from droidrun.config_manager import ClickMode, InteractionMode
 
 from async_adbutils import adb
 from droidrun.agent.common.events import WaitEvent
@@ -17,14 +17,15 @@ from droidrun.tools.tools import Tools
 
 
 async def create_tools_from_config(
-    device_config: "DeviceConfig", vision_enabled: bool = True
+    device_config: "DeviceConfig",
+    interaction_mode: "InteractionMode" = None,
 ) -> "Tools":
     """
     Create Tools instance from DeviceConfig.
 
     Args:
         device_config: Device configuration
-        vision_enabled: Whether vision is enabled (for filter selection)
+        interaction_mode: Interaction mode for vision and filter selection
 
     Returns:
         AdbTools or IOSTools based on config
@@ -32,8 +33,16 @@ async def create_tools_from_config(
     Raises:
         ValueError: If no device found or invalid platform
     """
+    from droidrun.config_manager import InteractionMode
+
+    if interaction_mode is None:
+        interaction_mode = InteractionMode.TEXT
+
     is_ios = device_config.platform.lower() == "ios"
     device_serial = device_config.serial
+
+    # Determine vision_enabled from interaction_mode
+    vision_enabled = interaction_mode.default_vision
 
     if not is_ios:
         # Android: auto-detect if not specified
@@ -55,8 +64,7 @@ async def resolve_tools_instance(
     device_config: "DeviceConfig",
     tools_config_fallback: "ToolsConfig | None" = None,
     credential_manager=None,
-    vision_enabled: bool = True,
-    click_mode: Optional[ClickMode] = None,
+    interaction_mode: "InteractionMode" = None,
 ) -> tuple["Tools", "ToolsConfig"]:
     """
     Resolve Tools instance and ToolsConfig from various input types.
@@ -71,8 +79,7 @@ async def resolve_tools_instance(
         device_config: Device configuration for creating Tools if needed
         tools_config_fallback: Fallback ToolsConfig when tools is a Tools instance or None
         credential_manager: Optional credential manager to attach to Tools
-        vision_enabled: Whether vision is enabled (default: True)
-        click_mode: Click mode for formatter selection (default: INDEX)
+        interaction_mode: Interaction mode for vision and formatter selection
 
     Returns:
         Tuple of (tools_instance, tools_config):
@@ -89,9 +96,14 @@ async def resolve_tools_instance(
         >>> tools_cfg = ToolsConfig(disabled_tools=["long_press"])
         >>> tools_instance, tools_cfg = resolve_tools_instance(tools_cfg, device_config)
     """
+    from droidrun.config_manager import InteractionMode
     from droidrun.tools.formatters import IndexedFormatter, CoordinateFormatter
 
-    # Select formatter based on click_mode
+    if interaction_mode is None:
+        interaction_mode = InteractionMode.TEXT
+
+    # Select formatter based on click_mode derived from interaction_mode
+    click_mode = interaction_mode.click_mode
     if click_mode in (ClickMode.COORDINATE, ClickMode.HYBRID):
         tree_formatter = CoordinateFormatter()
     else:
@@ -109,7 +121,7 @@ async def resolve_tools_instance(
     # Case 2: ToolsConfig provided
     elif tools is not None and isinstance(tools, ToolsConfig):
         tools_instance = await create_tools_from_config(
-            device_config, vision_enabled=vision_enabled
+            device_config, interaction_mode=interaction_mode
         )
         tools_instance.tree_formatter = tree_formatter
         tools_cfg = tools
@@ -117,7 +129,7 @@ async def resolve_tools_instance(
     # Case 3: None provided
     else:
         tools_instance = await create_tools_from_config(
-            device_config, vision_enabled=vision_enabled
+            device_config, interaction_mode=interaction_mode
         )
         tools_instance.tree_formatter = tree_formatter
         tools_cfg = tools_config_fallback if tools_config_fallback else ToolsConfig()

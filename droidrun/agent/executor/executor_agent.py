@@ -31,6 +31,9 @@ from droidrun.agent.utils.prompt_resolver import PromptResolver
 from droidrun.agent.utils.tools import (
     ATOMIC_ACTION_SIGNATURES,
     click,
+    click_at,
+    click_area,
+    filter_atomic_actions,
     long_press,
     open_app,
     swipe,
@@ -70,15 +73,20 @@ class ExecutorAgent(Workflow):
         self.llm = llm
         self.agent_config = agent_config
         self.config = agent_config.executor
-        self.vision = agent_config.executor.vision
+        self.vision = agent_config.get_effective_vision("executor")
         self.tools_instance = tools_instance
         self.shared_state = shared_state
         self.prompt_resolver = prompt_resolver or PromptResolver()
 
         self.custom_tools = custom_tools if custom_tools is not None else {}
-        self.atomic_tools = (
-            atomic_tools if atomic_tools is not None else ATOMIC_ACTION_SIGNATURES
-        )
+        
+        # Build atomic tools based on click_mode from interaction_mode
+        if atomic_tools is not None:
+            self.atomic_tools = atomic_tools
+        else:
+            # Filter atomic actions based on click_mode
+            click_mode = agent_config.interaction_mode.click_mode
+            self.atomic_tools = filter_atomic_actions([], click_mode=click_mode)
 
         logger.debug("ExecutorAgent initialized.")
 
@@ -336,6 +344,24 @@ class ExecutorAgent(Workflow):
                     return False, "Missing 'text' parameter", "Failed: open_app requires text"
                 await open_app(text, tools=self.tools_instance)
                 return True, "", f"Opened app: {text}"
+
+            elif action_type == "click_at":
+                x = action_dict.get("x")
+                y = action_dict.get("y")
+                if x is None or y is None:
+                    return False, "Missing 'x' or 'y' parameter", "Failed: click_at requires x and y"
+                result = await click_at(x, y, tools=self.tools_instance)
+                return True, "", f"Clicked at coordinates ({x}, {y}): {result}"
+
+            elif action_type == "click_area":
+                x1 = action_dict.get("x1")
+                y1 = action_dict.get("y1")
+                x2 = action_dict.get("x2")
+                y2 = action_dict.get("y2")
+                if None in (x1, y1, x2, y2):
+                    return False, "Missing coordinate parameters", "Failed: click_area requires x1, y1, x2, y2"
+                result = await click_area(x1, y1, x2, y2, tools=self.tools_instance)
+                return True, "", f"Clicked area center [{x1},{y1},{x2},{y2}]: {result}"
 
             else:
                 return False, f"Unknown action type: {action_type}", f"Failed: unknown action '{action_type}'"

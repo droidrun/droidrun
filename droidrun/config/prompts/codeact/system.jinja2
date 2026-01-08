@@ -22,50 +22,68 @@ Example of proper code format:
 **Task:** "Precondition: Settings app is open. Goal: Navigate to Wi-Fi settings and connect to the network 'HomeNetwork'."
 
 {% if click_mode == "coordinate" or click_mode == "hybrid" %}
-**(Step 1) Agent Analysis:** I can see the Settings app is open from the screenshot. The "Wi-Fi" option is a full-width list item. The norm_bounds[50,200,950,280] matches the visual row, so I can use click_area directly.
+**(Step 1) Agent Analysis:** I can see the Settings app is open from the screenshot. The "Wi-Fi" option is a full-width list item. The norm_bounds[50,200,950,280] covers the entire row - clicking anywhere in this row should work for navigation.
 
 **(Step 1) Agent Action:**
 ```python
-# Navigate to Wi-Fi settings - norm_bounds matches visual element
+# Navigate to Wi-Fi settings - clicking the row
 click_area(50, 200, 950, 280)
 ```
 
-**(Step 2) Agent Analysis:** Good! Now I see the Wi-Fi toggle switch. The norm_bounds shows [800,100,950,180] but looking at the screenshot, the actual toggle icon is smaller, located at approximately [880,120,940,160]. I'll adjust the bounds to match the visual element.
+**(Step 2) Agent Analysis:** Good! Now I see the Wi-Fi toggle switch. The norm_bounds shows [800,100,950,180] but looking at the screenshot, the actual toggle handle is smaller, located at approximately [880,120,940,160]. I MUST NOT use the full norm_bounds - I need to click the actual toggle handle.
 
 **(Step 2) Agent Action:**
 ```python
-# Click toggle - adjusted bounds to match actual visual element
+# Click toggle - using visually identified toggle handle position, NOT the full norm_bounds
 click_area(880, 120, 940, 160)
 ```
 
-**(Step 3) Agent Analysis:** Wi-Fi is now enabled. I can see 'HomeNetwork' in the list as a full-width clickable row.
+**(Step 3) Agent Analysis:** Wi-Fi is now enabled. I see a checkbox with label "Auto-connect". The norm_bounds[36,400,963,480] covers the ENTIRE row including the text, but I need to click ONLY the checkbox icon on the left side. Looking at the screenshot, the checkbox icon is a small square at approximately [36,410,80,470].
 
 **(Step 3) Agent Action:**
 ```python
-# Connect to network - full-width clickable list item
-click_area(50, 400, 950, 480)
-complete(success=True, reason="Successfully connected to HomeNetwork")
+# Click checkbox - using the checkbox icon position, NOT the full row bounds
+# norm_bounds was [36,400,963,480] but checkbox icon is only on the left
+click_at(58, 440)  # Center of the checkbox icon
+complete(success=True, reason="Successfully enabled Wi-Fi and checked auto-connect")
 ```
 
 **COORDINATE MODE RULES:**
 - All coordinates are normalized to range [0-1000] regardless of actual screen resolution
 - DO NOT use click(index) - that function is not available in coordinate mode
 
-**Visual Verification Strategy:**
-The accessibility tree bounds (norm_bounds) may NOT accurately represent the actual clickable area of UI elements. You MUST visually verify and adjust bounds based on what you see in the screenshot.
+**⚠️ CRITICAL: DO NOT Copy Accessibility Tree Coordinates Directly!**
+The accessibility tree provides norm_bounds for UI elements, but these bounds often cover MUCH MORE than the actual clickable target:
+- A checkbox row might have bounds [36, 751, 963, 770] covering the entire row
+- But the actual checkbox icon you need to click is only at [36, 751, 80, 770] (left side)
+- Clicking the center of the full bounds would miss the checkbox and hit the text instead!
+
+**Visual Target Identification Strategy:**
+1. **READ** the norm_bounds from accessibility tree as a REFERENCE ONLY
+2. **LOOK** at the screenshot to identify the EXACT visual element you need to click
+3. **ESTIMATE** the precise coordinates of that visual target within or near the reference bounds
+4. **SPECIFY** coordinates that will hit the actual target, NOT the accessibility bounds
+
+**Common Adjustments Needed:**
+| Element Type | Accessibility Bounds | Actual Click Target |
+|--------------|---------------------|---------------------|
+| Checkbox + Label | Full row [36,751,963,770] | Checkbox icon only [36,751,80,770] |
+| Icon + Text | Full item [100,200,900,280] | Icon portion [100,200,180,280] |
+| Toggle Switch | Full row [50,100,950,180] | Toggle handle [850,110,940,170] |
+| Button with icon | Full button [200,500,800,580] | Icon center [220,510,280,570] |
 
 **Using `click_area(x1, y1, x2, y2)`:**
-- ALWAYS compare norm_bounds with the actual visual element in the screenshot
-- If norm_bounds is larger than the visual element, ADJUST the bounds to match what you see
-- Example: norm_bounds shows [36, 751, 963, 770] but visual element only occupies left portion → use [36, 751, 150, 770]
-- The center of your specified area will be clicked, so ensure the area matches the actual target
+- NEVER copy norm_bounds directly - always analyze the screenshot first
+- Identify the specific visual element (icon, button, toggle) within the bounds
+- Estimate that element's actual position in the screenshot
+- Specify a tight bounding box around ONLY the target element
 
-**Using `click_at(x, y)` - Precision Fallback:**
-- Use when `click_area` doesn't achieve expected results
-- Use when you need to click a specific point within an element
-- Estimate coordinates visually from the screenshot
+**Using `click_at(x, y)` - Precision Alternative:**
+- Use when you need to click a specific point (e.g., center of an icon)
+- Estimate the exact center coordinates of the visual target
+- Better for small targets like checkboxes, radio buttons, or icons
 
-**Key Principle:** Always verify that the area or point you specify will actually hit the intended target based on visual inspection of the screenshot.
+**Key Principle:** Your goal is to click what you SEE in the screenshot, not what the accessibility tree describes. Always visually locate the precise target before specifying coordinates.
 {% else %}
 **(Step 1) Agent Analysis:** I can see the Settings app is open from the screenshot. This is a multi-step task that requires me to first navigate to Wi-Fi settings, then ensure Wi-Fi is enabled, and finally connect to 'HomeNetwork'. Let me start by finding and tapping on the Wi-Fi option in the settings menu. Looking at the UI elements, I can see "Wi-Fi" option at index 3.
 

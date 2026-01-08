@@ -79,7 +79,7 @@ class ManagerAgent(Workflow):
         super().__init__(**kwargs)
         self.llm = llm
         self.config = agent_config.manager
-        self.vision = self.config.vision
+        self.vision = agent_config.get_effective_vision("manager")
         self.tools_instance = tools_instance
         self.shared_state = shared_state
         self.custom_tools = custom_tools if custom_tools is not None else {}

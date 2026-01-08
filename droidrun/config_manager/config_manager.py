@@ -12,7 +12,7 @@ from droidrun.config_manager.safe_execution import SafeExecutionConfig
 
 class ClickMode(str, Enum):
     """
-    Click mode enumeration.
+    Click mode enumeration (internal use).
     
     Attributes:
         INDEX: Index-based click - LLM outputs element index, system calculates center point
@@ -22,6 +22,52 @@ class ClickMode(str, Enum):
     INDEX = "index"
     COORDINATE = "coordinate"
     HYBRID = "hybrid"
+
+
+class InteractionMode(str, Enum):
+    """
+    Interaction mode determines both vision capability and click method.
+    
+    This unified configuration ensures proper pairing of vision and click modes,
+    as coordinate-based clicking requires visual verification for accuracy.
+    
+    Attributes:
+        TEXT: Text-only mode - No screenshots, index-based clicking (lowest token usage)
+        VISION_INDEX: Vision + index click - Screenshots enabled, index-based clicking
+        VISION_COORDINATE: Vision + coordinate click - Screenshots enabled, coordinate clicking
+        VISION_HYBRID: Vision + hybrid click - Screenshots enabled, both click methods
+    
+    Usage:
+        interaction_mode: vision_coordinate  # Global setting
+        
+        # Per-agent vision override (optional):
+        manager:
+          vision: false  # Override: disable vision for this agent
+    """
+    TEXT = "text"
+    VISION_INDEX = "vision_index"
+    VISION_COORDINATE = "vision_coordinate"
+    VISION_HYBRID = "vision_hybrid"
+    
+    @property
+    def default_vision(self) -> bool:
+        """Get default vision setting for this interaction mode."""
+        return self != InteractionMode.TEXT
+    
+    @property
+    def click_mode(self) -> ClickMode:
+        """Get the click mode for this interaction mode."""
+        if self == InteractionMode.VISION_COORDINATE:
+            return ClickMode.COORDINATE
+        elif self == InteractionMode.VISION_HYBRID:
+            return ClickMode.HYBRID
+        else:
+            return ClickMode.INDEX
+    
+    @property
+    def use_detailed_filter(self) -> bool:
+        """TEXT mode needs detailed tree filter, vision modes use concise."""
+        return self == InteractionMode.TEXT
 
 
 # ---------- Config Schema ----------
@@ -56,7 +102,7 @@ class LLMProfile:
 class CodeActConfig:
     """CodeAct agent configuration."""
 
-    vision: bool = False
+    vision: Optional[bool] = None  # None = follow interaction_mode default
     system_prompt: str = "system.jinja2"
     user_prompt: str = "user.jinja2"
     safe_execution: bool = False
@@ -66,7 +112,7 @@ class CodeActConfig:
 class ManagerConfig:
     """Manager agent configuration."""
 
-    vision: bool = False
+    vision: Optional[bool] = None  # None = follow interaction_mode default
     system_prompt: str = "system.jinja2"
     stateless: bool = False  # Use stateless manager (no chat history)
 
@@ -75,7 +121,7 @@ class ManagerConfig:
 class ExecutorConfig:
     """Executor agent configuration."""
 
-    vision: bool = False
+    vision: Optional[bool] = None  # None = follow interaction_mode default
     system_prompt: str = "system.jinja2"
 
 
@@ -112,13 +158,48 @@ class AgentConfig:
     after_sleep_action: float = 1.0
     wait_for_stable_ui: float = 0.3
     prompts_dir: str = "config/prompts"
-    click_mode: ClickMode = ClickMode.INDEX
+    interaction_mode: InteractionMode = InteractionMode.TEXT
 
     codeact: CodeActConfig = field(default_factory=CodeActConfig)
     manager: ManagerConfig = field(default_factory=ManagerConfig)
     executor: ExecutorConfig = field(default_factory=ExecutorConfig)
     scripter: ScripterConfig = field(default_factory=ScripterConfig)
     app_cards: AppCardConfig = field(default_factory=AppCardConfig)
+
+    @property
+    def click_mode(self) -> ClickMode:
+        """Get click mode derived from interaction_mode."""
+        return self.interaction_mode.click_mode
+
+    def get_effective_vision(self, agent: str) -> bool:
+        """
+        Get effective vision setting for a specific agent.
+        
+        If the agent has an explicit vision override, use that.
+        Otherwise, use the default from interaction_mode.
+        
+        Args:
+            agent: Agent name ('codeact', 'manager', 'executor')
+            
+        Returns:
+            True if vision should be enabled for this agent
+        """
+        agent_config = getattr(self, agent, None)
+        if agent_config is not None and agent_config.vision is not None:
+            return agent_config.vision
+        return self.interaction_mode.default_vision
+
+    def get_vision_state(self) -> Dict[str, bool]:
+        """Get vision state for all agents."""
+        return {
+            "manager": self.get_effective_vision("manager"),
+            "executor": self.get_effective_vision("executor"),
+            "codeact": self.get_effective_vision("codeact"),
+        }
+
+    def any_vision_enabled(self) -> bool:
+        """Check if any agent has vision enabled."""
+        return any(self.get_vision_state().values())
 
     def get_codeact_system_prompt_path(self) -> str:
         """Get resolved absolute path to CodeAct system prompt."""
@@ -317,12 +398,12 @@ class DroidrunConfig:
             AppCardConfig(**app_cards_data) if app_cards_data else AppCardConfig()
         )
 
-        # Parse click_mode (string -> ClickMode enum)
-        click_mode_str = agent_data.get("click_mode", "index")
+        # Parse interaction_mode (string -> InteractionMode enum)
+        interaction_mode_str = agent_data.get("interaction_mode", "text")
         try:
-            click_mode = ClickMode(click_mode_str)
+            interaction_mode = InteractionMode(interaction_mode_str)
         except ValueError:
-            click_mode = ClickMode.INDEX
+            interaction_mode = InteractionMode.TEXT
 
         agent_config = AgentConfig(
             max_steps=agent_data.get("max_steps", 15),
@@ -331,7 +412,7 @@ class DroidrunConfig:
             after_sleep_action=agent_data.get("after_sleep_action", 1.0),
             wait_for_stable_ui=agent_data.get("wait_for_stable_ui", 0.3),
             prompts_dir=agent_data.get("prompts_dir", "config/prompts"),
-            click_mode=click_mode,
+            interaction_mode=interaction_mode,
             codeact=codeact_config,
             manager=manager_config,
             executor=executor_config,

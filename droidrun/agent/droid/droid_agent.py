@@ -341,11 +341,7 @@ class DroidAgent(Workflow):
                 tools=",".join(atomic_tools + ["remember", "complete"]),
                 max_steps=self.config.agent.max_steps,
                 timeout=timeout,
-                vision={
-                    "manager": self.config.agent.manager.vision,
-                    "executor": self.config.agent.executor.vision,
-                    "codeact": self.config.agent.codeact.vision,
-                },
+                vision=self.config.agent.get_vision_state(),
                 reasoning=self.config.agent.reasoning,
                 enable_tracing=self.config.tracing.enabled,
                 debug=self.config.logging.debug,
@@ -488,17 +484,16 @@ class DroidAgent(Workflow):
         if self.tools_instance is None:
             # Determine if vision is enabled based on the active agent role
             if self.config.agent.reasoning:
-                vision_enabled = self.config.agent.manager.vision
+                vision_enabled = self.config.agent.get_effective_vision("manager")
             else:
-                vision_enabled = self.config.agent.codeact.vision
+                vision_enabled = self.config.agent.get_effective_vision("codeact")
 
             tools_instance, tools_config_resolved = await resolve_tools_instance(
                 tools=self.tools_fallback,
                 device_config=self.resolved_device_config,
                 tools_config_fallback=self.config.tools,
                 credential_manager=self.credential_manager,
-                vision_enabled=vision_enabled,
-                click_mode=self.config.agent.click_mode,
+                interaction_mode=self.config.agent.interaction_mode,
             )
 
             self.tools_instance = tools_instance
@@ -942,11 +937,7 @@ class DroidAgent(Workflow):
                         ctx.write_event_to_stream(
                             ScreenshotEvent(screenshot=screenshot)
                         )
-                        vision_any = (
-                            self.config.agent.manager.vision
-                            or self.config.agent.executor.vision
-                            or self.config.agent.codeact.vision
-                        )
+                        vision_any = self.config.agent.any_vision_enabled()
                         parent_span = trace.get_current_span()
                         record_langfuse_screenshot(
                             screenshot,
@@ -959,11 +950,7 @@ class DroidAgent(Workflow):
                     ctx.write_event_to_stream(
                         ScreenshotEvent(screenshot=screenshot_result)
                     )
-                    vision_any = (
-                        self.config.agent.manager.vision
-                        or self.config.agent.executor.vision
-                        or self.config.agent.codeact.vision
-                    )
+                    vision_any = self.config.agent.any_vision_enabled()
                     parent_span = trace.get_current_span()
                     record_langfuse_screenshot(
                         screenshot_result,

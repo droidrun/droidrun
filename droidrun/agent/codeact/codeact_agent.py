@@ -72,7 +72,7 @@ class CodeActAgent(Workflow):
         self.agent_config = agent_config
         self.config = agent_config.codeact
         self.max_steps = agent_config.max_steps
-        self.vision = agent_config.codeact.vision
+        self.vision = agent_config.get_effective_vision("codeact")
         self.debug = debug
         self.tools = tools_instance
         self.shared_state = shared_state

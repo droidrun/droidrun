@@ -15,16 +15,21 @@ agent:
   wait_for_stable_ui: 0.3
   # Base directory for prompt templates
   prompts_dir: config/prompts
-  # Click mode: index (element index), coordinate (normalized [0-1000]), or hybrid (both)
-  # - index: LLM outputs element index from a11y tree, system clicks center
-  # - coordinate: LLM outputs normalized coordinates, enables precise visual clicking
-  # - hybrid: Both index and coordinate click methods available
-  click_mode: index
+  
+  # Interaction mode determines both vision capability and click method
+  # Options:
+  #   - text: Text-only, index-based clicking (lowest token usage, no screenshots)
+  #   - vision_index: Screenshots enabled, index-based clicking
+  #   - vision_coordinate: Screenshots enabled, coordinate-based clicking [0-1000]
+  #   - vision_hybrid: Screenshots enabled, both index and coordinate clicking
+  # Note: Coordinate modes require vision for visual verification of click targets
+  interaction_mode: text
 
   # CodeAct Agent Configuration
   codeact:
-    # Enable vision capabilities (screenshots)
-    vision: false
+    # Vision override (optional): true/false to override interaction_mode default
+    # Leave unset or null to follow interaction_mode setting
+    # vision: null
     # System prompt filename (located in prompts_dir/codeact/)
     system_prompt: system.jinja2
     # User prompt filename (located in prompts_dir/codeact/)
@@ -34,8 +39,9 @@ agent:
 
   # Manager Agent Configuration
   manager:
-    # Enable vision capabilities (screenshots)
-    vision: false
+    # Vision override (optional): true/false to override interaction_mode default
+    # Leave unset or null to follow interaction_mode setting
+    # vision: null
     # System prompt filename (located in prompts_dir/manager/)
     system_prompt: system.jinja2
     # Use stateless manager (rebuilds context each turn, no chat history, experimental)
@@ -43,8 +49,9 @@ agent:
 
   # Executor Agent Configuration
   executor:
-    # Enable vision capabilities (screenshots)
-    vision: false
+    # Vision override (optional): true/false to override interaction_mode default
+    # Executor typically doesn't need vision as it follows Manager's plan
+    # vision: false
     # System prompt filename (located in prompts_dir/executor/)
     system_prompt: system.jinja2
 
@@ -233,14 +240,14 @@ safe_execution:
 # === Tool Settings ===
 tools:
   # Disabled tools - add tool names to disable them
-  # Available tools (varies by click_mode):
-  #   Index mode (click_mode: index):
+  # Available tools (varies by interaction_mode):
+  #   text/vision_index modes:
   #     - click          # Tap UI elements by index
   #     - long_press     # Long press UI elements by index
-  #   Coordinate mode (click_mode: coordinate):
+  #   vision_coordinate mode:
   #     - click_at       # Tap at normalized coordinates [0-1000]
   #     - click_area     # Tap center of normalized area [0-1000]
-  #   Hybrid mode (click_mode: hybrid):
+  #   vision_hybrid mode:
   #     All above click tools available
   #   Common tools (all modes):
   #     - type           # Type text into input fields

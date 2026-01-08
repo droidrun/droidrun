@@ -7,6 +7,7 @@ from droidrun.config_manager.config_manager import (
     DeviceConfig,
     DroidrunConfig,
     ExecutorConfig,
+    InteractionMode,
     LLMProfile,
     LoggingConfig,
     ManagerConfig,
@@ -31,6 +32,7 @@ __all__ = [
     # Agent configs
     "AgentConfig",
     "ClickMode",
+    "InteractionMode",
     "CodeActConfig",
     "ManagerConfig",
     "ExecutorConfig",

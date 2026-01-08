@@ -21,7 +21,7 @@ from rich.text import Text
 
 from droidrun import ResultEvent, DroidAgent
 from droidrun.cli.logs import LogHandler
-from droidrun.config_manager import DroidrunConfig
+from droidrun.config_manager import DroidrunConfig, InteractionMode
 from droidrun.macro.cli import macro_cli
 from droidrun import __version__
 from droidrun.portal import (
@@ -99,7 +99,7 @@ async def run_command(
     steps: int | None = None,
     base_url: str | None = None,
     api_base: str | None = None,
-    vision: bool | None = None,
+    interaction_mode: str | None = None,
     manager_vision: bool | None = None,
     executor_vision: bool | None = None,
     codeact_vision: bool | None = None,
@@ -161,21 +161,21 @@ async def run_command(
             # STEP 1: Apply CLI overrides via direct mutation
             # ================================================================
 
-            # Vision overrides
-            if vision is not None:
-                # --vision flag overrides all agents
-                config.agent.manager.vision = vision
-                config.agent.executor.vision = vision
-                config.agent.codeact.vision = vision
-                logger.debug(f"CLI override: vision={vision} (all agents)")
-            else:
-                # Apply individual agent vision overrides
-                if manager_vision is not None:
-                    config.agent.manager.vision = manager_vision
-                if executor_vision is not None:
-                    config.agent.executor.vision = executor_vision
-                if codeact_vision is not None:
-                    config.agent.codeact.vision = codeact_vision
+            # Interaction mode override (unified vision + click mode)
+            if interaction_mode is not None:
+                try:
+                    config.agent.interaction_mode = InteractionMode(interaction_mode)
+                    logger.debug(f"CLI override: interaction_mode={interaction_mode}")
+                except ValueError:
+                    logger.warning(f"Invalid interaction_mode '{interaction_mode}', using config default")
+
+            # Per-agent vision overrides (optional, takes precedence over interaction_mode)
+            if manager_vision is not None:
+                config.agent.manager.vision = manager_vision
+            if executor_vision is not None:
+                config.agent.executor.vision = executor_vision
+            if codeact_vision is not None:
+                config.agent.codeact.vision = codeact_vision
 
             # Agent overrides
             if steps is not None:
@@ -217,9 +217,11 @@ async def run_command(
                 else "direct execution"
             )
             logger.info(f"🤖 Agent mode: {mode}")
+            vision_state = config.agent.get_vision_state()
             logger.info(
-                f"👁️  Vision settings: Manager={config.agent.manager.vision}, "
-                f"Executor={config.agent.executor.vision}, CodeAct={config.agent.codeact.vision}"
+                f"👁️  Interaction mode: {config.agent.interaction_mode.value} | "
+                f"Vision: Manager={vision_state['manager']}, "
+                f"Executor={vision_state['executor']}, CodeAct={vision_state['codeact']}"
             )
 
             if config.tracing.enabled:
@@ -416,9 +418,10 @@ def cli():
     default=None,
 )
 @click.option(
-    "--vision/--no-vision",
+    "--interaction-mode", "-i",
+    type=click.Choice(["text", "vision_index", "vision_coordinate", "vision_hybrid"]),
     default=None,
-    help="Enable vision capabilites by using screenshots for all agents.",
+    help="Interaction mode: text (no vision), vision_index, vision_coordinate, or vision_hybrid",
 )
 @click.option(
     "--reasoning/--no-reasoning", default=None, help="Enable planning with reasoning"
@@ -455,7 +458,7 @@ async def run(
     base_url: str | None,
     api_base: str | None,
     temperature: float | None,
-    vision: bool | None,
+    interaction_mode: str | None,
     reasoning: bool | None,
     stream: bool | None,
     tracing: bool | None,
@@ -476,7 +479,7 @@ async def run(
             steps=steps,
             base_url=base_url,
             api_base=api_base,
-            vision=vision,
+            interaction_mode=interaction_mode,
             reasoning=reasoning,
             stream=stream,
             tracing=tracing,
@@ -726,7 +729,7 @@ async def test(
     config_path: str | None = None,
     device: str | None = None,
     steps: int | None = None,
-    vision: bool | None = None,
+    interaction_mode: str | None = None,
     reasoning: bool | None = None,
     tracing: bool | None = None,
     debug: bool | None = None,
@@ -762,13 +765,13 @@ async def test(
             # STEP 1: Apply CLI overrides via direct mutation
             # ================================================================
 
-            # Vision overrides
-            if vision is not None:
-                # --vision flag overrides all agents
-                config.agent.manager.vision = vision
-                config.agent.executor.vision = vision
-                config.agent.codeact.vision = vision
-                logger.debug(f"CLI override: vision={vision} (all agents)")
+            # Interaction mode override
+            if interaction_mode is not None:
+                try:
+                    config.agent.interaction_mode = InteractionMode(interaction_mode)
+                    logger.debug(f"CLI override: interaction_mode={interaction_mode}")
+                except ValueError:
+                    logger.warning(f"Invalid interaction_mode '{interaction_mode}', using config default")
 
             # Agent overrides
             if steps is not None:
@@ -808,9 +811,11 @@ async def test(
                 else "direct execution"
             )
             logger.info(f"🤖 Agent mode: {mode}")
+            vision_state = config.agent.get_vision_state()
             logger.info(
-                f"👁️  Vision settings: Manager={config.agent.manager.vision}, "
-                f"Executor={config.agent.executor.vision}, CodeAct={config.agent.codeact.vision}"
+                f"👁️  Interaction mode: {config.agent.interaction_mode.value} | "
+                f"Vision: Manager={vision_state['manager']}, "
+                f"Executor={vision_state['executor']}, CodeAct={vision_state['codeact']}"
             )
 
             if config.tracing.enabled:
@@ -878,7 +883,7 @@ if __name__ == "__main__":
     temperature = 0
     api_key = os.getenv("GOOGLE_API_KEY")
     steps = 15
-    vision = True
+    interaction_mode = "vision_index"
     reasoning = False
     tracing = True
     debug = True
