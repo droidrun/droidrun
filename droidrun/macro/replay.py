@@ -86,7 +86,11 @@ class MacroPlayer:
                 await tools.start_app(package, activity)
                 return True
 
-            elif action_type == "tap":
+            elif action_type in ("tap", "tap_coordinate", "tap_area"):
+                # All tap variants use absolute coordinates (x, y)
+                # - tap: index-based click (converted to coordinates)
+                # - tap_coordinate: normalized coordinate click
+                # - tap_area: normalized area center click
                 x = action.get("x", 0)
                 y = action.get("y", 0)
                 element_text = action.get("element_text", "")

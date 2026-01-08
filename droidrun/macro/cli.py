@@ -206,7 +206,8 @@ async def _show_dry_run(
         action_type = action.get("action_type", action.get("type", "unknown"))
         details = ""
 
-        if action_type == "tap":
+        if action_type in ("tap", "tap_coordinate", "tap_area"):
+            # All tap variants use absolute coordinates (x, y)
             x, y = action.get("x", 0), action.get("y", 0)
             element_text = action.get("element_text", "")
             details = f"({x}, {y}) - '{element_text}'"
