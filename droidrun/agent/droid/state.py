@@ -99,6 +99,17 @@ class DroidAgentState(BaseModel):
     custom_variables: Dict = Field(default_factory=dict)
     output_dir: str = ""
 
+    # ========================================================================
+    # App Context (from Nova)
+    # ========================================================================
+    app_name: str | None = None  # Name of the app being tested
+    app_link: str | None = None  # Play Store or App Store link for the app
+
+    # ========================================================================
+    # GCP Upload Results
+    # ========================================================================
+    video_url: str | None = None  # GCS URL to trajectory video after upload
+
     def update_current_app(self, package_name: str, activity_name: str):
         """
         Update package and activity together, capturing telemetry event only once.

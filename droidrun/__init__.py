@@ -2,14 +2,13 @@
 Droidrun - A framework for controlling Android devices through LLM agents.
 """
 
-from importlib.metadata import version
-
-__version__ = version("droidrun")
+__version__ = "0.4.16"
 
 # Import main classes for easier access
 from droidrun.agent import ResultEvent
 from droidrun.agent.droid import DroidAgent
 from droidrun.agent.utils.llm_picker import load_llm
+from droidrun.cli.main import run_command, TestRunResult
 
 # Import configuration classes
 from droidrun.config_manager import (
@@ -42,6 +41,9 @@ __all__ = [
     "DroidAgent",
     "load_llm",
     "ResultEvent",
+    # CLI / API
+    "run_command",
+    "TestRunResult",
     # Tools
     "Tools",
     "AdbTools",
