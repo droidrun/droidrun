@@ -55,6 +55,9 @@ Some test steps may be marked as "FAIL" due to:
 
 These are FALSE NEGATIVES - the test actually succeeded but was incorrectly marked as failed.
 
+**Critical**
+If all the steps are passed, then directly return the result as pass with a summarised view of the Test Case.
+
 ## Your Task
 Analyze the test execution data and determine:
 1. Did the test achieve its ACTUAL OBJECTIVE (not just individual step expectations)?
@@ -73,7 +76,7 @@ Analyze the test execution data and determine:
 
 ## Decision Guidelines
 - Mark as PASSED if: The actual user journey completed successfully, even if some intermediate
-  observations were missed (like a loading screen that was too fast to capture)
+  observations were missed (like a loading screen that was too fast to capture) OR All the steps were marked as passed.
 - Mark as FAILED if: There were actual functional failures (button not found, wrong screen
   reached, errors occurred, user cannot proceed)
 
