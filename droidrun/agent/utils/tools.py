@@ -289,6 +289,34 @@ async def open_url(url: str, *, tools: "Tools" = None, **kwargs) -> str:
     return await tools.open_url(url)
 
 
+async def press_key(keycode: int, *, tools: "Tools" = None, **kwargs) -> str:
+    """
+    Press a key by its Android keycode.
+
+    Common keycodes:
+        - 111: Escape (dismiss keyboard)
+        - 4: Back
+        - 3: Home
+        - 66: Enter
+        - 67: Delete/Backspace
+        - 61: Tab
+        - 19: Dpad Up
+        - 20: Dpad Down
+        - 21: Dpad Left
+        - 22: Dpad Right
+
+    Args:
+        keycode: The Android keycode to press
+        tools: The Tools instance (injected automatically)
+
+    Returns:
+        Result message from the key press operation
+    """
+    if tools is None:
+        raise ValueError("tools parameter is required")
+    return await tools.press_key(keycode)
+
+
 async def wait(duration: float = 1.0, *, tools: "Tools" = None, **kwargs) -> str:
     """
     Wait for a specified duration in seconds.
@@ -384,6 +412,11 @@ ATOMIC_ACTION_SIGNATURES = {
         "arguments": ["duration"],
         "description": 'Wait for a specified duration in seconds. Useful for waiting for animations, page loads, or other time-based operations. Usage Example: {"action": "wait", "duration": 2.0}',
         "function": wait,
+    },
+    "press_key": {
+        "arguments": ["keycode"],
+        "description": 'Press a key by its Android keycode. Common keycodes: 111 (Escape/dismiss keyboard), 4 (Back), 3 (Home), 66 (Enter), 67 (Delete/Backspace), 61 (Tab). Usage Example: press_key(111) to dismiss keyboard',
+        "function": press_key,
     },
     # "copy": {
     #     "arguments": ["text"],
