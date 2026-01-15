@@ -74,32 +74,31 @@ When signing up for any app, use these standard credentials:
 - **Password:** `qaiAgent@123` (use this for ALL sign-up flows)
 - **Name:** `QAI Agent` or `Test User`
 
-### Email Registration with Yopmail:
-For test cases requiring manual email registration/sign-up, use Yopmail as a disposable email inbox.
+### Email Registration:
+For test cases requiring email registration/sign-up, the email address will be provided in the task prompt. Use the provided email address for sign-up.
 
-**Email Format:** `qai_agent_{app-name}_{yyyymmdd}_{HHMM}{timezone}@yopmail.com`
+**Email Verification Flow:**
+1. Use the email address provided in the task for signing up in the app
+2. After submitting the sign-up form that requires email verification
+3. Use `get_email(email_address)` to retrieve the latest verification email
+4. The function returns the email body containing the verification code or link
+5. Extract the verification code from the returned email content
+6. Enter the verification code in the app to complete the process
 
-Example: For testing SoundWheel app on 7th October 2024 at 16:45 IST:
-`qai_agent_soundwheel_20241007_1645IST@yopmail.com`
+**Example:**
+```python
+# After submitting sign-up form, wait for email to arrive
+wait(5)
+# Get the verification email
+email_content = get_email("user@example.com")
+# The email_content contains the verification code - extract it
+# Then enter the code in the app
+```
 
-**Email Verification Flow (Sign-Up Only):**
-1. Use the Yopmail email format above when signing up in the app
-2. After submitting sign-up form that requires email verification
-3. Open Chrome and go to `yopmail.com`
-4. Enter the same email address (without @yopmail.com) to check inbox
-5. Refresh inbox and wait 10 seconds for verification email to arrive
-6. Look for the most recent email from the app being tested
-7. Extract the verification code or tap the verification link
-8. Return to the app and complete the verification process
-
-NOTE: If verification email doesn't appear after 10 seconds, refresh again and wait another 10 seconds before reporting failure.
-
-**Handling Yopmail Ads:**
-When visiting Yopmail in Chrome, you may encounter ads or pop-ups that block the page content:
-- Look for "X", "Close", or dismiss buttons on any ad overlays
-- Close any pop-up ads before interacting with the Yopmail inbox
-- If ads persist, try tapping outside the ad or using the back button and navigating again
-- Wait for the page to fully load before looking for the email inbox
+**Important Notes:**
+- The `get_email()` function waits up to 30 seconds for the email to arrive
+- If no email arrives, it returns an error message
+- Extract OTP/verification codes from the email body text
 
 ### Function Syntax (CRITICAL - Read Carefully):
 **IMPORTANT:** All interaction functions (`click`, `type`, `long_press`, etc.) use an **index** parameter, NOT coordinates. Always use the element index from the UI state.

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any, Dict, List
 
 if TYPE_CHECKING:
@@ -6,6 +7,8 @@ if TYPE_CHECKING:
     from droidrun.tools import Tools
 
 from droidrun.agent.oneflows.app_starter_workflow import AppStarter
+
+logger = logging.getLogger(__name__)
 
 
 async def create_tools_from_config(
@@ -317,6 +320,61 @@ async def press_key(keycode: int, *, tools: "Tools" = None, **kwargs) -> str:
     return await tools.press_key(keycode)
 
 
+def get_email(email_address: str, *, tools: "Tools" = None, **kwargs) -> str:
+    """
+    Retrieve the latest email from the given email address using MailSlurp.
+
+    This function waits for an email to arrive (up to 30 seconds) and returns
+    the email body content. Useful for extracting verification codes/OTPs
+    during sign-up flows.
+
+    Args:
+        email_address: The email address to retrieve emails from (must be a MailSlurp inbox)
+        tools: The Tools instance (injected automatically)
+
+    Returns:
+        The email body content as a string, or an error message if retrieval fails.
+
+    Example:
+        email_content = get_email("qai_executor_abc123@mailslurp.biz")
+        # Extract OTP from email_content
+    """
+    try:
+        from mailSlurp import get_client
+
+        client = get_client()
+
+        logger.info(f"Waiting for email in inbox: {email_address}")
+
+        # Wait for the latest email to arrive (30 second timeout)
+        email = client.wait_for_latest_email(
+            inbox_email=email_address,
+            timeout_ms=30000,
+            unread_only=True,
+        )
+
+        # Extract email content
+        subject = email.get("subject", "No subject")
+        body = email.get("body") or email.get("textExcerpt") or email.get("bodyExcerpt") or ""
+
+        logger.info(f"Retrieved email with subject: {subject}")
+
+        # Return formatted email content
+        result = f"Subject: {subject}\n\nBody:\n{body}"
+
+        # If HTML content is available and body is empty, mention it
+        if not body and email.get("html"):
+            result += "\n\n[Email contains HTML content - check for verification links]"
+
+        return result
+
+    except ImportError:
+        return "Error: MailSlurp module not available. Please install mailSlurp dependencies."
+    except Exception as e:
+        logger.error(f"Failed to retrieve email: {e}")
+        return f"Error retrieving email from {email_address}: {str(e)}"
+
+
 async def wait(duration: float = 1.0, *, tools: "Tools" = None, **kwargs) -> str:
     """
     Wait for a specified duration in seconds.
@@ -417,6 +475,11 @@ ATOMIC_ACTION_SIGNATURES = {
         "arguments": ["keycode"],
         "description": 'Press a key by its Android keycode. Common keycodes: 111 (Escape/dismiss keyboard), 4 (Back), 3 (Home), 66 (Enter), 67 (Delete/Backspace), 61 (Tab). Usage Example: press_key(111) to dismiss keyboard',
         "function": press_key,
+    },
+    "get_email": {
+        "arguments": ["email_address"],
+        "description": 'Retrieve the latest email from a MailSlurp inbox. Waits up to 30 seconds for an email to arrive. Returns the email subject and body content. Useful for extracting verification codes/OTPs during sign-up flows. Usage Example: get_email("qai_executor_abc123@mailslurp.biz")',
+        "function": get_email,
     },
     # "copy": {
     #     "arguments": ["text"],
