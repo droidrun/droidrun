@@ -481,6 +481,11 @@ ATOMIC_ACTION_SIGNATURES = {
         "description": 'Retrieve the latest email from a MailSlurp inbox. Waits up to 30 seconds for an email to arrive. Returns the email subject and body content. Useful for extracting verification codes/OTPs during sign-up flows. Usage Example: get_email("qai_executor_abc123@mailslurp.biz")',
         "function": get_email,
     },
+    "open_url": {
+        "arguments": ["url"],
+        "description": 'Open a URL on the device. Useful for opening Play Store links to install apps. Usage Example: open_url("https://play.google.com/store/apps/details?id=com.example.app")',
+        "function": open_url,
+    },
     # "copy": {
     #     "arguments": ["text"],
     #     "description": "Copy the specified text to the clipboard. Provide the text to copy using the 'text' argument. Example: {\"action\": \"copy\", \"text\": \"the text you want to copy\"}\nAlways use copy action to copy text to clipboard."
