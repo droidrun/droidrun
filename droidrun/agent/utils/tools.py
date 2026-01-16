@@ -322,26 +322,32 @@ async def press_key(keycode: int, *, tools: "Tools" = None, **kwargs) -> str:
 
 def get_email(email_address: str, *, tools: "Tools" = None, **kwargs) -> str:
     """
-    Retrieve the latest email from the given email address using MailSlurp.
+    Retrieve and parse the latest verification email from a MailSlurp inbox.
 
-    This function waits for an email to arrive (up to 30 seconds) and returns
-    the email body content. Useful for extracting verification codes/OTPs
-    during sign-up flows.
+    This function waits for an email to arrive (up to 30 seconds), then uses
+    an LLM to intelligently extract either a verification link OR an OTP code,
+    returning a clean actionable response.
 
     Args:
-        email_address: The email address to retrieve emails from (must be a MailSlurp inbox)
+        email_address: The MailSlurp inbox email address (provided in task credentials)
         tools: The Tools instance (injected automatically)
 
     Returns:
-        The email body content as a string, or an error message if retrieval fails.
-        Automatically extracts verification links and OTP codes when found.
+        A structured response with one of these formats:
+        - "VERIFICATION_LINK: <url>" - Use open_url() to open this link
+        - "OTP_CODE: <code>" - Type this code into the verification field
+        - "ERROR: <message>" - Something went wrong
 
     Example:
-        email_content = get_email("qai_executor_abc123@mailslurp.biz")
-        # Extract OTP from email_content
+        result = get_email("qai_executor-xyz@mailslurp.biz")
+        # Returns: "VERIFICATION_LINK: https://example.com/verify?token=abc"
+        # Then use: open_url("https://example.com/verify?token=abc")
+        #
+        # Or returns: "OTP_CODE: 123456"
+        # Then use: type("123456", otp_field_index)
     """
     import html
-    import re
+    import json
 
     try:
         from mailSlurp import get_client
@@ -364,75 +370,123 @@ def get_email(email_address: str, *, tools: "Tools" = None, **kwargs) -> str:
 
         logger.info(f"Retrieved email with subject: {subject}")
 
-        # Decode HTML entities in body (e.g., &amp; -> &)
+        # Decode HTML entities
         if body:
             body = html.unescape(body)
+        if html_content:
+            html_content = html.unescape(html_content)
 
-        # Build result
-        result = f"Subject: {subject}\n\nBody:\n{body}"
+        # Combine content for LLM analysis
+        email_content = f"Subject: {subject}\n\nBody:\n{body}"
+        if html_content:
+            email_content += f"\n\nHTML Content:\n{html_content}"
 
-        # Extract verification links from HTML content or body (some emails have HTML in body)
-        extracted_links = []
-        # Use html_content if available, otherwise check body for HTML markup
-        content_to_search = html_content if html_content else body
+        # Use LLM to extract verification info
+        extraction_result = _extract_verification_with_llm(email_content, tools)
 
-        if content_to_search:
-            # Decode HTML entities first
-            content_decoded = html.unescape(content_to_search)
-
-            # Extract all URLs from href attributes
-            href_pattern = r'href=["\']([^"\']+)["\']'
-            all_links = re.findall(href_pattern, content_decoded)
-
-            # Filter for verification-related links
-            verification_keywords = [
-                "verify", "confirm", "activate", "validation", "token",
-                "auth", "click", "action", "email", "code", "otp"
-            ]
-            for link in all_links:
-                link_lower = link.lower()
-                if any(keyword in link_lower for keyword in verification_keywords):
-                    if link not in extracted_links:
-                        extracted_links.append(link)
-
-            # If no verification links found, include all non-trivial links
-            if not extracted_links:
-                for link in all_links:
-                    if (link.startswith("http") and
-                        "unsubscribe" not in link.lower() and
-                        "mailto:" not in link.lower()):
-                        if link not in extracted_links:
-                            extracted_links.append(link)
-
-        # Extract potential OTP codes (4-8 digit numbers)
-        otp_codes = []
-        combined_text = f"{subject} {body}"
-        otp_pattern = r'\b(\d{4,8})\b'
-        potential_codes = re.findall(otp_pattern, combined_text)
-        for code in potential_codes:
-            # Filter out likely non-OTP numbers (years, etc.)
-            if not (code.startswith("19") or code.startswith("20")) or len(code) > 4:
-                if code not in otp_codes:
-                    otp_codes.append(code)
-
-        # Add extracted information to result
-        if extracted_links:
-            result += "\n\n--- Extracted Verification Links ---"
-            for i, link in enumerate(extracted_links[:5], 1):  # Limit to 5 links
-                result += f"\n{i}. {link}"
-
-        if otp_codes:
-            result += "\n\n--- Potential OTP/Verification Codes ---"
-            for code in otp_codes[:3]:  # Limit to 3 codes
-                result += f"\n- {code}"
-
-        return result
+        return extraction_result
 
     except ImportError:
-        return "Error: MailSlurp module not available. Please install mailSlurp dependencies."
+        return "ERROR: MailSlurp module not available. Please install mailSlurp dependencies."
     except Exception as e:
         logger.error(f"Failed to retrieve email: {e}")
-        return f"Error retrieving email from {email_address}: {str(e)}"
+        return f"ERROR: Failed to retrieve email from {email_address}: {str(e)}"
+
+
+def _extract_verification_with_llm(email_content: str, tools: "Tools" = None) -> str:
+    """
+    Use LLM to intelligently extract verification link or OTP from email content.
+
+    Args:
+        email_content: The full email content (subject + body + html)
+        tools: Tools instance to access LLM
+
+    Returns:
+        Structured response: VERIFICATION_LINK, OTP_CODE, or ERROR
+    """
+    import os
+    from enum import Enum
+
+    from pydantic import BaseModel, Field
+
+    class VerificationType(str, Enum):
+        VERIFICATION_LINK = "VERIFICATION_LINK"
+        OTP_CODE = "OTP_CODE"
+        NO_VERIFICATION_FOUND = "NO_VERIFICATION_FOUND"
+
+    class VerificationResult(BaseModel):
+        """Structured result for email verification extraction."""
+
+        type: VerificationType = Field(
+            description="The type of verification found in the email"
+        )
+        value: str = Field(
+            description="The verification link URL or OTP code digits, or reason if not found"
+        )
+
+    extraction_prompt = """Analyze this email and extract the verification method.
+
+EMAIL CONTENT:
+{email_content}
+
+TASK:
+1. Determine if this is a verification/confirmation email
+2. Extract EITHER:
+   - The verification/confirmation LINK (full URL) if present
+   - The OTP/verification CODE (numeric digits) if present
+
+RULES:
+- For links: Extract the COMPLETE URL including all query parameters
+- For OTP: Extract ONLY the numeric code (4-8 digits typically)
+- Prefer verification LINK over OTP if both exist
+- If neither found, set type to NO_VERIFICATION_FOUND and explain why in value"""
+
+    try:
+        # Try to use the tools' LLM if available
+        if tools is not None and hasattr(tools, "app_opener_llm") and tools.app_opener_llm is not None:
+            llm = tools.app_opener_llm
+            structured_llm = llm.as_structured_llm(VerificationResult)
+            response = structured_llm.complete(
+                extraction_prompt.format(email_content=email_content[:4000])
+            )
+            result = response.raw
+        else:
+            # Fallback: Use Google GenAI directly with structured output
+            try:
+                from llama_index.llms.google_genai import GoogleGenAI
+
+                # Try to get API key from environment, then from gcp_upload config
+                api_key = os.environ.get("GOOGLE_API_KEY")
+                if not api_key:
+                    try:
+                        from gcp_upload.config import config as gcp_config
+
+                        api_key = gcp_config.gemini_api_key
+                    except ImportError:
+                        return "ERROR: GOOGLE_API_KEY not set and gcp_upload config not available"
+
+                llm = GoogleGenAI(model="gemini-2.0-flash", temperature=0.0, api_key=api_key)
+                structured_llm = llm.as_structured_llm(VerificationResult)
+                response = structured_llm.complete(
+                    extraction_prompt.format(email_content=email_content[:4000])
+                )
+                result = response.raw
+            except Exception as llm_error:
+                logger.error(f"LLM extraction failed: {llm_error}")
+                return f"ERROR: Could not analyze email - LLM unavailable: {str(llm_error)}"
+
+        # Format the structured response
+        if isinstance(result, VerificationResult):
+            formatted_result = f"{result.type.value}: {result.value}"
+            logger.info(f"LLM extracted: {formatted_result[:100]}...")
+            return formatted_result
+        else:
+            logger.warning(f"Unexpected result type: {type(result)}")
+            return f"ERROR: Unexpected response format from LLM"
+
+    except Exception as e:
+        logger.error(f"LLM extraction error: {e}")
+        return f"ERROR: Failed to extract verification info: {str(e)}"
 
 
 async def wait(duration: float = 1.0, *, tools: "Tools" = None, **kwargs) -> str:
@@ -538,7 +592,7 @@ ATOMIC_ACTION_SIGNATURES = {
     },
     "get_email": {
         "arguments": ["email_address"],
-        "description": 'Retrieve the latest email from a MailSlurp inbox. Waits up to 30 seconds for an email to arrive. Returns the email subject and body content. Useful for extracting verification codes/OTPs during sign-up flows. Usage Example: get_email("qai_executor_abc123@mailslurp.biz")',
+        "description": 'Retrieve and parse verification email from MailSlurp inbox (use email from task credentials). Returns one of: "VERIFICATION_LINK: <url>" - call open_url(url) to complete verification; "OTP_CODE: <digits>" - type this code into the OTP input field in the app using type(code, index); "ERROR: <msg>" - retrieval failed.',
         "function": get_email,
     },
     "open_url": {
