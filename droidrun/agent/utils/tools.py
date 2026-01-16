@@ -371,15 +371,18 @@ def get_email(email_address: str, *, tools: "Tools" = None, **kwargs) -> str:
         # Build result
         result = f"Subject: {subject}\n\nBody:\n{body}"
 
-        # Extract verification links from HTML content
+        # Extract verification links from HTML content or body (some emails have HTML in body)
         extracted_links = []
-        if html_content:
+        # Use html_content if available, otherwise check body for HTML markup
+        content_to_search = html_content if html_content else body
+
+        if content_to_search:
             # Decode HTML entities first
-            html_decoded = html.unescape(html_content)
+            content_decoded = html.unescape(content_to_search)
 
             # Extract all URLs from href attributes
             href_pattern = r'href=["\']([^"\']+)["\']'
-            all_links = re.findall(href_pattern, html_decoded)
+            all_links = re.findall(href_pattern, content_decoded)
 
             # Filter for verification-related links
             verification_keywords = [
