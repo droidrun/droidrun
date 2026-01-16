@@ -194,6 +194,37 @@ class CredentialsConfig:
 
 
 @dataclass
+class ExternalAgentConfig:
+    """Configuration for external agent.
+
+    When name is set, DroidRun uses the external agent instead of native agents.
+    All other fields are passed to the external agent's run() function.
+    """
+
+    name: Optional[str] = None  # Agent name: "mai_ui", "autoglm", etc.
+    provider: Optional[str] = None  # LLM provider
+    model: Optional[str] = None  # LLM model
+    base_url: Optional[str] = None  # Custom API base URL
+    api_key: Optional[str] = None  # API key (if different from env)
+    temperature: float = 0.3  # LLM temperature
+    extra: Dict[str, Any] = field(default_factory=dict)  # Agent-specific settings
+
+    def to_agent_config(self) -> Dict[str, Any]:
+        """Convert to dict for passing to external agent."""
+        config = {
+            "provider": self.provider,
+            "model": self.model,
+            "base_url": self.base_url,
+            "api_key": self.api_key,
+            "temperature": self.temperature,
+        }
+        # Filter out None values and merge extra
+        config = {k: v for k, v in config.items() if v is not None}
+        config.update(self.extra)
+        return config
+
+
+@dataclass
 class DroidrunConfig:
     """Complete DroidRun configuration schema."""
 
@@ -206,6 +237,7 @@ class DroidrunConfig:
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     credentials: CredentialsConfig = field(default_factory=CredentialsConfig)
     safe_execution: SafeExecutionConfig = field(default_factory=SafeExecutionConfig)
+    external_agent: Optional[ExternalAgentConfig] = None
 
     def __post_init__(self):
         """Ensure default profiles exist."""
@@ -329,6 +361,22 @@ class DroidrunConfig:
             else SafeExecutionConfig()
         )
 
+        # Parse external_agent config
+        external_agent_data = data.get("external_agent")
+        external_agent_config = None
+        if external_agent_data and isinstance(external_agent_data, dict):
+            known_fields = {"name", "provider", "model", "base_url", "api_key", "temperature"}
+            extra = {k: v for k, v in external_agent_data.items() if k not in known_fields}
+            external_agent_config = ExternalAgentConfig(
+                name=external_agent_data.get("name"),
+                provider=external_agent_data.get("provider"),
+                model=external_agent_data.get("model"),
+                base_url=external_agent_data.get("base_url"),
+                api_key=external_agent_data.get("api_key"),
+                temperature=external_agent_data.get("temperature", 0.3),
+                extra=extra,
+            )
+
         return cls(
             agent=agent_config,
             llm_profiles=llm_profiles,
@@ -339,6 +387,7 @@ class DroidrunConfig:
             tools=ToolsConfig(**data.get("tools", {})),
             credentials=CredentialsConfig(**data.get("credentials", {})),
             safe_execution=safe_execution_config,
+            external_agent=external_agent_config,
         )
 
     @classmethod

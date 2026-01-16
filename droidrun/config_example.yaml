@@ -257,3 +257,29 @@ credentials:
   enabled: false
   # Path to credentials file (see config/credentials_example.yaml for format)
   file_path: config/credentials.yaml
+
+# === External Agent Settings ===
+# Configure external agents (AutoGLM, and more soon)
+# To use: set agent.external_agent to the agent name
+# max_steps is shared from agent.max_steps
+#
+# Example usage in agent section:
+#   agent:
+#     external_agent: autoglm
+#     max_steps: 20
+#
+external_agents:
+  # AutoGLM - Open-AutoGLM phone agent
+  # https://github.com/ArtificialZeng/Open-AutoGLM
+  autoglm:
+    llm:
+      provider: OpenAILike
+      model: autoglm-phone-9b
+      base_url: http://localhost:8000/v1
+      api_key: EMPTY
+      temperature: 0.0
+      top_p: 0.85
+      frequency_penalty: 0.2
+      max_tokens: 3000
+    lang: cn      # cn (18 detailed rules) or en (minimal)
+    stream: true

@@ -72,6 +72,7 @@ from droidrun.telemetry import (
     capture,
     flush,
 )
+from droidrun.agent.external import load_agent
 from droidrun.agent.utils.tracing_setup import (
     apply_session_context,
     record_langfuse_screenshot,
@@ -509,6 +510,30 @@ class DroidAgent(Workflow):
             self.executor_agent.atomic_tools = self.atomic_tools
 
         self.tools_instance._set_context(ctx)
+
+        # External agent mode - bypass DroidRun agents entirely
+        if self.config.external_agent and self.config.external_agent.name:
+            agent_name = self.config.external_agent.name
+            agent = load_agent(agent_name)
+            if not agent:
+                raise ValueError(f"Failed to load external agent: {agent_name}")
+
+            # Merge config: agent defaults + external_agent config
+            agent_config = {
+                **agent["config"],
+                **self.config.external_agent.to_agent_config(),
+            }
+
+            logger.info(f"🤖 Using external agent: {agent_name}")
+
+            result = await agent["run"](
+                tools=self.tools_instance,
+                instruction=self.shared_state.instruction,
+                config=agent_config,
+                max_steps=self.config.agent.max_steps,
+            )
+
+            return FinalizeEvent(success=result["success"], reason=result["reason"])
 
         if self.config.logging.save_trajectory != "none":
             self.trajectory_writer.write(self.trajectory, stage="init")
