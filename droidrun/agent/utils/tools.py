@@ -334,11 +334,15 @@ def get_email(email_address: str, *, tools: "Tools" = None, **kwargs) -> str:
 
     Returns:
         The email body content as a string, or an error message if retrieval fails.
+        Automatically extracts verification links and OTP codes when found.
 
     Example:
         email_content = get_email("qai_executor_abc123@mailslurp.biz")
         # Extract OTP from email_content
     """
+    import html
+    import re
+
     try:
         from mailSlurp import get_client
 
@@ -356,15 +360,68 @@ def get_email(email_address: str, *, tools: "Tools" = None, **kwargs) -> str:
         # Extract email content
         subject = email.get("subject", "No subject")
         body = email.get("body") or email.get("textExcerpt") or email.get("bodyExcerpt") or ""
+        html_content = email.get("html") or ""
 
         logger.info(f"Retrieved email with subject: {subject}")
 
-        # Return formatted email content
+        # Decode HTML entities in body (e.g., &amp; -> &)
+        if body:
+            body = html.unescape(body)
+
+        # Build result
         result = f"Subject: {subject}\n\nBody:\n{body}"
 
-        # If HTML content is available and body is empty, mention it
-        if not body and email.get("html"):
-            result += "\n\n[Email contains HTML content - check for verification links]"
+        # Extract verification links from HTML content
+        extracted_links = []
+        if html_content:
+            # Decode HTML entities first
+            html_decoded = html.unescape(html_content)
+
+            # Extract all URLs from href attributes
+            href_pattern = r'href=["\']([^"\']+)["\']'
+            all_links = re.findall(href_pattern, html_decoded)
+
+            # Filter for verification-related links
+            verification_keywords = [
+                "verify", "confirm", "activate", "validation", "token",
+                "auth", "click", "action", "email", "code", "otp"
+            ]
+            for link in all_links:
+                link_lower = link.lower()
+                if any(keyword in link_lower for keyword in verification_keywords):
+                    if link not in extracted_links:
+                        extracted_links.append(link)
+
+            # If no verification links found, include all non-trivial links
+            if not extracted_links:
+                for link in all_links:
+                    if (link.startswith("http") and
+                        "unsubscribe" not in link.lower() and
+                        "mailto:" not in link.lower()):
+                        if link not in extracted_links:
+                            extracted_links.append(link)
+
+        # Extract potential OTP codes (4-8 digit numbers)
+        otp_codes = []
+        combined_text = f"{subject} {body}"
+        otp_pattern = r'\b(\d{4,8})\b'
+        potential_codes = re.findall(otp_pattern, combined_text)
+        for code in potential_codes:
+            # Filter out likely non-OTP numbers (years, etc.)
+            if not (code.startswith("19") or code.startswith("20")) or len(code) > 4:
+                if code not in otp_codes:
+                    otp_codes.append(code)
+
+        # Add extracted information to result
+        if extracted_links:
+            result += "\n\n--- Extracted Verification Links ---"
+            for i, link in enumerate(extracted_links[:5], 1):  # Limit to 5 links
+                result += f"\n{i}. {link}"
+
+        if otp_codes:
+            result += "\n\n--- Potential OTP/Verification Codes ---"
+            for code in otp_codes[:3]:  # Limit to 3 codes
+                result += f"\n- {code}"
 
         return result
 
