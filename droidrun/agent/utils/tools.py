@@ -356,10 +356,10 @@ def get_email(email_address: str, *, tools: "Tools" = None, **kwargs) -> str:
 
         logger.info(f"Waiting for email in inbox: {email_address}")
 
-        # Wait for the latest email to arrive (30 second timeout)
+        # Wait for the latest email to arrive (15 second timeout)
         email = client.wait_for_latest_email(
             inbox_email=email_address,
-            timeout_ms=30000,
+            timeout_ms=15000,
             unread_only=True,
         )
 
