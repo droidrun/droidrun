@@ -75,30 +75,42 @@ When signing up for any app, use these standard credentials:
 - **Name:** `QAI Agent` or `Test User`
 
 ### Email Registration:
-For test cases requiring email registration/sign-up, the email address will be provided in the task prompt. Use the provided email address for sign-up.
+For test cases requiring email registration/sign-up, the email address will be provided in the task credentials. Use that email address for sign-up.
 
 **Email Verification Flow:**
-1. Use the email address provided in the task for signing up in the app
-2. After submitting the sign-up form that requires email verification
-3. Use `get_email(email_address)` to retrieve the latest verification email
-4. The function returns the email body containing the verification code or link
-5. Extract the verification code from the returned email content
-6. Enter the verification code in the app to complete the process
+1. Use the email address from task credentials for signing up in the app
+2. After submitting the sign-up form, call `get_email(email_address)` to retrieve verification
+3. The function automatically extracts and returns ONE of:
+   - `VERIFICATION_LINK: <url>` → Call `open_url(url)` to complete verification
+   - `OTP_CODE: <digits>` → Type this code into the OTP field using `type(code, index)`
+   - `ERROR: <message>` → Verification retrieval failed
 
-**Example:**
+**Example - Verification Link:**
 ```python
-# After submitting sign-up form, wait for email to arrive
+# After submitting sign-up form
 wait(5)
-# Get the verification email
-email_content = get_email("user@example.com")
-# The email_content contains the verification code - extract it
-# Then enter the code in the app
+result = get_email("qai_executor-xyz@mailslurp.biz")  # Use email from task credentials
+# result = "VERIFICATION_LINK: https://example.com/verify?token=abc123"
+if result.startswith("VERIFICATION_LINK:"):
+    link = result.split("VERIFICATION_LINK: ")[1]
+    open_url(link)
+```
+
+**Example - OTP Code:**
+```python
+# After submitting sign-up form
+wait(5)
+result = get_email("qai_executor-xyz@mailslurp.biz")  # Use email from task credentials
+# result = "OTP_CODE: 123456"
+if result.startswith("OTP_CODE:"):
+    code = result.split("OTP_CODE: ")[1]
+    type(code, otp_field_index)  # Type into the OTP input field
 ```
 
 **Important Notes:**
-- The `get_email()` function waits up to 30 seconds for the email to arrive
-- If no email arrives, it returns an error message
-- Extract OTP/verification codes from the email body text
+- ALWAYS use the email address provided in task credentials (not a placeholder!)
+- The function waits up to 15 seconds for the email to arrive
+- No need to manually extract codes - the function does it automatically
 
 ### Function Syntax (CRITICAL - Read Carefully):
 **IMPORTANT:** All interaction functions (`click`, `type`, `long_press`, etc.) use an **index** parameter, NOT coordinates. Always use the element index from the UI state.
@@ -163,7 +175,7 @@ During sign-up flows, you may encounter unexpected system prompts. Handle them a
 **Other unexpected dialogs:**
 - Dismiss promotional pop-ups, rating requests, and update prompts
 - Look for "X", "Close", "Skip", "Not now", or "Later" buttons
-- Use `back()` if no dismiss button is visible
+- Use `system_button("back")` or `press_key(4)` if no dismiss button is visible
 
 **Example handling:**
 ```python
@@ -237,8 +249,9 @@ click(4)  # Retry tapping "SIGN UP"
 
 If still unsuccessful:
 ```python
-# Attempt 3: Try alternative approach - maybe scroll to find the button or check if index changed
-scroll_down()
+# Attempt 3: Try alternative approach - scroll to find the button or check if index changed
+# Note: swipe() uses pixel coordinates [x, y], not element indices
+swipe([540, 1200], [540, 400])  # Swipe from (540,1200) to (540,400) to scroll down
 wait(2)
 # Re-examine UI elements and find the correct button
 click(new_index)  # Tap the correct element
