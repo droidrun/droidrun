@@ -350,11 +350,17 @@ def get_email(email_address: str, *, tools: "Tools" = None, **kwargs) -> str:
     import json
 
     try:
+        import time
+
         from mailSlurp import get_client
 
         client = get_client()
 
-        logger.info(f"Waiting for email in inbox: {email_address}")
+        # Wait 10 seconds for the email to be sent/delivered before checking
+        logger.info(f"Waiting 10 seconds for email delivery to {email_address}...")
+        time.sleep(10)
+
+        logger.info(f"Checking for email in inbox: {email_address}")
 
         # Wait for the latest email to arrive (15 second timeout)
         email = client.wait_for_latest_email(
@@ -459,7 +465,7 @@ RULES:
                 extraction_prompt.format(email_content=email_content[:4000])
             )
             result = response.raw
-            logger.info(f"LLM response received, raw type: {type(result)}")
+            logger.info(f"LLM response received, raw result: {result.__class__.__name__}")
         else:
             # Fallback: Use Google GenAI directly with structured output
             logger.info("Using Google GenAI fallback for extraction")
@@ -482,7 +488,7 @@ RULES:
                     extraction_prompt.format(email_content=email_content[:4000])
                 )
                 result = response.raw
-                logger.info(f"LLM response received, raw type: {type(result)}")
+                logger.info(f"LLM response received, raw result: {result.__class__.__name__}")
             except Exception as llm_error:
                 logger.error(f"LLM extraction failed: {llm_error}")
                 return f"ERROR: Could not analyze email - LLM unavailable: {str(llm_error)}"
