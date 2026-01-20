@@ -423,7 +423,7 @@ def _extract_verification_with_llm(email_content: str, tools: "Tools" = None) ->
     class VerificationResult(BaseModel):
         """Structured result for email verification extraction."""
 
-        type: VerificationType = Field(
+        verification_type: VerificationType = Field(
             description="The type of verification found in the email"
         )
         value: str = Field(
@@ -445,7 +445,7 @@ RULES:
 - For links: Extract the COMPLETE URL including all query parameters
 - For OTP: Extract ONLY the numeric code (4-8 digits typically)
 - Prefer verification LINK over OTP if both exist
-- If neither found, set type to NO_VERIFICATION_FOUND and explain why in value"""
+- If neither found, set verification_type to NO_VERIFICATION_FOUND and explain why in value"""
 
     try:
         logger.info("Starting LLM-based verification extraction...")
@@ -489,18 +489,18 @@ RULES:
 
         # Format the structured response
         if isinstance(result, VerificationResult):
-            if result.type == VerificationType.NO_VERIFICATION_FOUND:
+            if result.verification_type == VerificationType.NO_VERIFICATION_FOUND:
                 logger.warning(f"No verification found: {result.value}")
                 return f"ERROR: No verification link or OTP code found in email. Reason: {result.value}"
             # Clean up the extracted value (unescape HTML entities in URLs)
             value = result.value
-            if result.type == VerificationType.VERIFICATION_LINK:
+            if result.verification_type == VerificationType.VERIFICATION_LINK:
                 value = value.replace('&amp;', '&')
-            formatted_result = f"{result.type.value}: {value}"
+            formatted_result = f"{result.verification_type.value}: {value}"
             logger.info(f"LLM extracted: {formatted_result[:100]}...")
             return formatted_result
         else:
-            logger.warning(f"Unexpected result type: {type(result)}")
+            logger.warning(f"Unexpected result format: {result}")
             return f"ERROR: Unexpected response format from LLM"
 
     except Exception as e:
