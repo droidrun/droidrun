@@ -384,6 +384,12 @@ def get_email(email_address: str, *, tools: "Tools" = None, **kwargs) -> str:
         # Use LLM to extract verification info
         extraction_result = _extract_verification_with_llm(email_content, tools)
 
+        # Validate the result format - must start with expected prefix
+        valid_prefixes = ("VERIFICATION_LINK:", "OTP_CODE:", "ERROR:")
+        if not extraction_result.startswith(valid_prefixes):
+            logger.error(f"Invalid extraction result format: {extraction_result[:100]}...")
+            return f"ERROR: Failed to extract verification info - unexpected format"
+
         return extraction_result
 
     except ImportError:
@@ -442,16 +448,21 @@ RULES:
 - If neither found, set type to NO_VERIFICATION_FOUND and explain why in value"""
 
     try:
+        logger.info("Starting LLM-based verification extraction...")
+
         # Try to use the tools' LLM if available
         if tools is not None and hasattr(tools, "app_opener_llm") and tools.app_opener_llm is not None:
+            logger.info("Using tools.app_opener_llm for extraction")
             llm = tools.app_opener_llm
             structured_llm = llm.as_structured_llm(VerificationResult)
             response = structured_llm.complete(
                 extraction_prompt.format(email_content=email_content[:4000])
             )
             result = response.raw
+            logger.info(f"LLM response received, raw type: {type(result)}")
         else:
             # Fallback: Use Google GenAI directly with structured output
+            logger.info("Using Google GenAI fallback for extraction")
             try:
                 from llama_index.llms.google_genai import GoogleGenAI
 
@@ -471,13 +482,21 @@ RULES:
                     extraction_prompt.format(email_content=email_content[:4000])
                 )
                 result = response.raw
+                logger.info(f"LLM response received, raw type: {type(result)}")
             except Exception as llm_error:
                 logger.error(f"LLM extraction failed: {llm_error}")
                 return f"ERROR: Could not analyze email - LLM unavailable: {str(llm_error)}"
 
         # Format the structured response
         if isinstance(result, VerificationResult):
-            formatted_result = f"{result.type.value}: {result.value}"
+            if result.type == VerificationType.NO_VERIFICATION_FOUND:
+                logger.warning(f"No verification found: {result.value}")
+                return f"ERROR: No verification link or OTP code found in email. Reason: {result.value}"
+            # Clean up the extracted value (unescape HTML entities in URLs)
+            value = result.value
+            if result.type == VerificationType.VERIFICATION_LINK:
+                value = value.replace('&amp;', '&')
+            formatted_result = f"{result.type.value}: {value}"
             logger.info(f"LLM extracted: {formatted_result[:100]}...")
             return formatted_result
         else:
