@@ -7,6 +7,7 @@ Architecture:
 - When reasoning=True: Uses Manager (planning) + Executor (action) workflows
 """
 
+import json
 import logging
 from typing import TYPE_CHECKING, Type, Awaitable, Union
 
@@ -762,9 +763,23 @@ class DroidAgent(Workflow):
         """
         Process Executor result and continue.
 
-        Checks for error escalation and loops back to Manager.
+        Checks for error escalation, repeated action loops, and loops back to Manager.
         Note: Max steps check is now done in run_manager pre-flight.
         """
+        # Check for repeated action loop (same action N times in a row)
+        repeat_thresh = 3
+        if len(self.shared_state.action_pool) >= repeat_thresh:
+            recent_actions = self.shared_state.action_pool[-repeat_thresh:]
+            try:
+                normalized = [json.dumps(a, sort_keys=True) for a in recent_actions]
+                if len(set(normalized)) == 1:
+                    logger.warning(
+                        f"⚠️ Executor stuck: same action repeated {repeat_thresh} times in a row: {normalized[0]}"
+                    )
+                    self.shared_state.error_flag_plan = True
+            except (TypeError, ValueError):
+                pass  # Non-serializable actions, skip detection
+
         # Check error escalation and reset flag when errors are resolved
         err_thresh = self.shared_state.err_to_manager_thresh
 
