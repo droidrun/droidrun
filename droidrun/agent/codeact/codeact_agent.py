@@ -343,6 +343,9 @@ Now, describe the next step you will take to address the original goal: {goal}""
                 activity_name=phone_state.get("currentApp", "Unknown"),
             )
 
+            # Store ui_state so it's available during code execution
+            await ctx.store.set("ui_state", a11y_tree)
+
             # Stream formatted state for trajectory
             ctx.write_event_to_stream(RecordUIStateEvent(ui_state=a11y_tree))
 
