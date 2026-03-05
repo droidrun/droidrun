@@ -41,3 +41,5 @@ frontend/
 reddit_python_posts.json
 
 test/
+venvrun.sh
+run.sh
