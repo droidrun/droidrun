@@ -760,7 +760,7 @@ wheels = [
 
 [[package]]
 name = "droidrun"
-version = "0.5.0.dev6"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },
