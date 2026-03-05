@@ -124,6 +124,17 @@ class DeviceConfig:
     platform: str = "android"  # "android" or "ios"
     auto_setup: bool = True  # auto-install/fix portal before each run
 
+    # SSH driver configuration
+    driver_type: str = "adb"  # "adb" or "ssh"
+    ssh_target: Optional[str] = (
+        None  # SSH target (e.g., "redmi9" or "user@192.168.1.100")
+    )
+    portal_url: Optional[str] = (
+        None  # Portal HTTP URL (e.g., "http://192.168.1.100:8080")
+    )
+    portal_token: str = ""  # Portal Bearer token
+    su_path: str = "/debug_ramdisk/su"  # Path to su binary on device
+
 
 @dataclass
 class TelemetryConfig:

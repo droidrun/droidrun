@@ -87,6 +87,7 @@ from droidrun.telemetry import (
     flush,
 )
 from droidrun.tools.driver.android import AndroidDriver
+from droidrun.tools.driver.android_ssh import AndroidSSHDriver
 from droidrun.tools.driver.base import DeviceDisconnectedError
 from droidrun.tools.driver.ios import IOSDriver
 from droidrun.tools.driver.recording import RecordingDriver
@@ -407,23 +408,36 @@ class DroidAgent(Workflow):
             driver = IOSDriver(url=ios_url)
             await driver.connect()
         else:
-            device_serial = self.resolved_device_config.serial
-            if device_serial is None:
-                devices = await adb.list()
-                if not devices:
-                    raise ValueError("No connected Android devices found.")
-                device_serial = devices[0].serial
+            # Check if using SSH driver
+            if self.resolved_device_config.driver_type == "ssh":
+                driver = AndroidSSHDriver(
+                    target=self.resolved_device_config.ssh_target,
+                    portal_url=self.resolved_device_config.portal_url,
+                    portal_token=self.resolved_device_config.portal_token,
+                    su_path=self.resolved_device_config.su_path,
+                )
+                await driver.connect()
+            else:
+                # ADB driver (default)
+                device_serial = self.resolved_device_config.serial
+                if device_serial is None:
+                    devices = await adb.list()
+                    if not devices:
+                        raise ValueError("No connected Android devices found.")
+                    device_serial = devices[0].serial
 
-            # Auto-setup portal if enabled
-            if self.config.device.auto_setup:
-                device_obj = await adb.device(serial=device_serial)
-                await ensure_portal_ready(device_obj, debug=self.config.logging.debug)
+                # Auto-setup portal if enabled (skip for SSH mode)
+                if self.config.device.auto_setup:
+                    device_obj = await adb.device(serial=device_serial)
+                    await ensure_portal_ready(
+                        device_obj, debug=self.config.logging.debug
+                    )
 
-            driver = AndroidDriver(
-                serial=device_serial,
-                use_tcp=self.resolved_device_config.use_tcp,
-            )
-            await driver.connect()
+                driver = AndroidDriver(
+                    serial=device_serial,
+                    use_tcp=self.resolved_device_config.use_tcp,
+                )
+                await driver.connect()
 
         # Wrap with StealthDriver if stealth mode enabled
         stealth_enabled = self.config.tools and self.config.tools.stealth
