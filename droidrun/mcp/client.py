@@ -7,9 +7,6 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
 if TYPE_CHECKING:
     from droidrun.mcp.config import MCPConfig, MCPServerConfig
 
@@ -33,7 +30,7 @@ class MCPClientManager:
         self.config = config
         self._tools: dict[str, MCPToolInfo] = {}
         self._server_tools: dict[str, list[str]] = {}
-        self._sessions: dict[str, ClientSession] = {}
+        self._sessions: dict = {}  # type: ignore
         self._exit_stacks: dict[str, AsyncExitStack] = {}
 
     async def discover_tools(self) -> dict[str, MCPToolInfo]:
@@ -59,6 +56,10 @@ class MCPClientManager:
         self, server_name: str, config: "MCPServerConfig"
     ) -> None:
         """Connect temporarily to fetch tool schemas."""
+        # Lazy import to avoid circular dependency with droidrun.mcp package
+        from mcp.client.session import ClientSession
+        from mcp.client.stdio import StdioServerParameters, stdio_client
+
         server_params = StdioServerParameters(
             command=config.command,
             args=config.args,
@@ -116,6 +117,10 @@ class MCPClientManager:
 
     async def _connect_server(self, server_name: str) -> None:
         """Establish persistent connection to a server."""
+        # Lazy import to avoid circular dependency with droidrun.mcp package
+        from mcp.client.session import ClientSession
+        from mcp.client.stdio import StdioServerParameters, stdio_client
+
         config = self.config.servers[server_name]
         server_params = StdioServerParameters(
             command=config.command,
