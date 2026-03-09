@@ -128,9 +128,9 @@ def capture(event: TelemetryEvent, user_id: str | None = None):
         event_name = type(event).__name__
         event_data = event.model_dump()
         properties = {
+            **event_data,
             "run_id": RUN_ID,
             "source": SOURCE,
-            **event_data,
         }
 
         posthog.capture(
