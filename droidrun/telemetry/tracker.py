@@ -20,6 +20,7 @@ droidrun_logger = logging.getLogger("droidrun")
 
 PROJECT_API_KEY = "phc_XyD3HKIsetZeRkmnfaBughs8fXWYArSUFc30C0HmRiO"
 HOST = "https://eu.i.posthog.com"
+SOURCE = "framework"
 USER_ID_PATH = Path.home() / ".droidrun" / "user_id"
 RUN_ID = str(uuid4())
 
@@ -128,6 +129,7 @@ def capture(event: TelemetryEvent, user_id: str | None = None):
         event_data = event.model_dump()
         properties = {
             "run_id": RUN_ID,
+            "source": SOURCE,
             **event_data,
         }
 
