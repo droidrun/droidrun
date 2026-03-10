@@ -15,6 +15,7 @@ from async_adbutils import adb
 
 from droidrun.tools.android.portal_client import PortalClient
 from droidrun.tools.driver.base import DeviceDriver
+from droidrun.tools.helpers.ocr_recognizer import OCRRecognizer
 
 logger = logging.getLogger("droidrun")
 
@@ -44,10 +45,13 @@ class AndroidDriver(DeviceDriver):
         serial: str | None = None,
         use_tcp: bool = False,
         remote_tcp_port: int = PORTAL_DEFAULT_TCP_PORT,
+        use_ocr: bool = False,
     ) -> None:
         self._serial = serial
         self._use_tcp = use_tcp
         self._remote_tcp_port = remote_tcp_port
+        self._use_ocr = use_ocr
+        self._ocr_recognizer: Optional[OCRRecognizer] = None
         self.device = None
         self.portal: PortalClient | None = None
         self._connected = False
@@ -168,9 +172,70 @@ class AndroidDriver(DeviceDriver):
         await self.ensure_connected()
         return await self.portal.take_screenshot(hide_overlay)
 
-    async def get_ui_tree(self) -> Dict[str, Any]:
+    async def get_ui_tree(
+        self,
+    ) -> Dict[str, Any]:
+        """Get UI tree from device.
+
+        Returns:
+            Dictionary containing a11y_tree, phone_state, and device_context.
+
+        Raises:
+            RuntimeError: If vision recognition fails and fallback is disabled.
+        """
         await self.ensure_connected()
+
+        if self._use_ocr:
+            return await self._get_ui_tree_via_ocr()
+
         return await self.portal.get_state()
+
+    async def _get_ui_tree_via_ocr(self) -> Dict[str, Any]:
+        """Get UI tree via OCR recognition from screenshot.
+
+        Returns:
+            Dictionary containing a11y_tree, phone_state, and device_context.
+
+        Raises:
+            RuntimeError: If OCR recognition fails.
+        """
+        try:
+            # First, get phone_state and device_context from Portal
+            portal_state = await self.portal.get_state()
+
+            # Initialize OCR recognizer if not already done
+            if self._ocr_recognizer is None:
+                self._ocr_recognizer = OCRRecognizer()
+
+            # Take screenshot
+            screenshot_bytes = await self.screenshot(hide_overlay=True)
+
+            # Get screen dimensions from device_context or fallback
+            device_context = portal_state.get("device_context", {})
+            screen_bounds = device_context.get("screen_bounds", {})
+            width = screen_bounds.get("width", 1080)
+            height = screen_bounds.get("height", 1920)
+
+            # Recognize UI tree via OCR
+            a11y_tree = self._ocr_recognizer.recognize_ui_tree(
+                screenshot_bytes=screenshot_bytes,
+                screen_width=width,
+                screen_height=height,
+            )
+
+            # Merge OCR a11y_tree with Portal phone_state and device_context
+            result = {
+                "a11y_tree": a11y_tree,
+                "phone_state": portal_state.get("phone_state", {}),
+                "device_context": portal_state.get("device_context", {}),
+            }
+
+            logger.debug("UI tree recognized via OCR with Portal state")
+            return result
+
+        except Exception as e:
+            logger.error(f"OCR-based UI tree recognition failed: {e}")
+            raise RuntimeError(f"Failed to recognize UI tree via OCR: {e}") from e
 
     async def get_date(self) -> str:
         await self.ensure_connected()

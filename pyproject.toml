@@ -60,6 +60,11 @@ anthropic = [
 deepseek = [
     "llama-index-llms-deepseek>=0.2.1",
 ]
+uitree = [
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "easyocr>=1.7.0",
+]
 dev = [
     "black==25.9.0",
     "ruff>=0.13.0",
