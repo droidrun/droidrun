@@ -5,7 +5,7 @@ These events route between DroidAgent and child agents.
 For internal agent events, see each agent's events.py file.
 """
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from llama_index.core.workflow import Event, StopEvent
 from pydantic import BaseModel
@@ -54,12 +54,10 @@ class ExecutorInputEvent(Event):
 
 
 class ExecutorResultEvent(Event):
-    """Executor finished with action result."""
+    """Executor finished with action result(s)."""
 
-    action: Dict
-    outcome: bool
-    error: str
-    summary: str
+    actions: List[Dict[str, Any]]
+    thought: str = ""
 
 
 # ============================================================================

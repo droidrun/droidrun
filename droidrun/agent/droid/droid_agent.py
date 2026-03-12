@@ -922,19 +922,22 @@ class DroidAgent(Workflow):
 
         result = await handler
 
-        # Update coordination state after execution
-        self.shared_state.action_history.append(result["action"])
-        self.shared_state.summary_history.append(result["summary"])
-        self.shared_state.action_outcomes.append(result["outcome"])
-        self.shared_state.error_descriptions.append(result["error"])
-        self.shared_state.last_action = result["action"]
-        self.shared_state.last_summary = result["summary"]
+        # Update coordination state after execution (all actions)
+        for action_record in result["actions"]:
+            action_dict = {"action": action_record["action"], **action_record.get("args", {})}
+            self.shared_state.action_history.append(action_dict)
+            self.shared_state.summary_history.append(action_record["summary"])
+            self.shared_state.action_outcomes.append(action_record["outcome"])
+            self.shared_state.error_descriptions.append(action_record["error"])
+
+        # Last action/summary = last in list
+        last = result["actions"][-1]
+        self.shared_state.last_action = {"action": last["action"], **last.get("args", {})}
+        self.shared_state.last_summary = last["summary"]
 
         return ExecutorResultEvent(
-            action=result["action"],
-            outcome=result["outcome"],
-            error=result["error"],
-            summary=result["summary"],
+            actions=result["actions"],
+            thought=result.get("thought", ""),
         )
 
     @step
