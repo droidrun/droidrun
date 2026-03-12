@@ -234,8 +234,8 @@ class ManagerAgent(Workflow):
                 else:
                     parts.append(f"Action: {action_str} | Result: Failed | Error: {err}\n")
             parts.append("</executed_actions>\n")
-        else:
-            # Executor returned no tool calls
+        elif self.shared_state.step_number > 1:
+            # Executor ran but returned no tool calls
             parts.append("<error>Executor returned no action</error>\n")
             if self.shared_state.last_executor_full_response:
                 output = self.shared_state.last_executor_full_response
