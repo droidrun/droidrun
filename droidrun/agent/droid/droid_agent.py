@@ -860,7 +860,7 @@ class DroidAgent(Workflow):
     ) -> ManagerInputEvent:
         if not ev.text_to_type or not ev.text_to_type.strip():
             logger.warning("⚠️ TextManipulator returned empty text, treating as no-op")
-            self.shared_state.last_summary = "Text manipulation returned empty result"
+            self.shared_state.last_executor_full_response = "Text manipulation returned empty result"
             self.shared_state.action_outcomes.append(False)
         else:
             try:
@@ -870,7 +870,7 @@ class DroidAgent(Workflow):
 
                 if not success:
                     logger.warning("⚠️ Text input may have failed")
-                    self.shared_state.last_summary = (
+                    self.shared_state.last_executor_full_response = (
                         "Text manipulation attempted but may have failed"
                     )
                     self.shared_state.action_outcomes.append(False)
@@ -878,11 +878,11 @@ class DroidAgent(Workflow):
                     logger.debug(
                         f"✅ Text manipulator successfully typed {len(ev.text_to_type)} characters"
                     )
-                    self.shared_state.last_summary = f"Text manipulation successful: typed {len(ev.text_to_type)} characters"
+                    self.shared_state.last_executor_full_response = f"Text manipulation successful: typed {len(ev.text_to_type)} characters"
                     self.shared_state.action_outcomes.append(True)
             except Exception as e:
                 logger.error(f"❌ Error during text input: {e}")
-                self.shared_state.last_summary = f"Text manipulation error: {str(e)}"
+                self.shared_state.last_executor_full_response = f"Text manipulation error: {str(e)}"
                 self.shared_state.action_outcomes.append(False)
 
         text_manipulation_record = {
@@ -922,21 +922,23 @@ class DroidAgent(Workflow):
 
         result = await handler
 
-        # Update coordination state after execution (all actions)
-        for action_record in result["actions"]:
+        # Update coordination state after execution
+        actions = result["actions"]
+        self.shared_state.last_executor_action_count = len(actions)
+
+        for action_record in actions:
             action_dict = {"action": action_record["action"], **action_record.get("args", {})}
             self.shared_state.action_history.append(action_dict)
             self.shared_state.summary_history.append(action_record["summary"])
             self.shared_state.action_outcomes.append(action_record["outcome"])
             self.shared_state.error_descriptions.append(action_record["error"])
 
-        # Last action/summary = last in list
-        last = result["actions"][-1]
-        self.shared_state.last_action = {"action": last["action"], **last.get("args", {})}
-        self.shared_state.last_summary = last["summary"]
+        if not actions:
+            # Executor returned text without tool calls — pass output to Manager
+            self.shared_state.last_executor_full_response = result.get("full_response", "")
 
         return ExecutorResultEvent(
-            actions=result["actions"],
+            actions=actions,
             thought=result.get("thought", ""),
         )
 

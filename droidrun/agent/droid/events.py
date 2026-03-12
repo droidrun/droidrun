@@ -56,7 +56,7 @@ class ExecutorInputEvent(Event):
 class ExecutorResultEvent(Event):
     """Executor finished with action result(s)."""
 
-    actions: List[Dict[str, Any]]
+    actions: List[Dict[str, Any]] = []
     thought: str = ""
 
 

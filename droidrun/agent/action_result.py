@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Dict, TypedDict
 
 
 @dataclass
@@ -14,3 +15,13 @@ class ActionResult:
 
     def __str__(self) -> str:
         return self.summary
+
+
+class ActionRecord(TypedDict):
+    """Record of an executed tool call, used across Executor/DroidAgent/Manager."""
+
+    action: str
+    args: Dict[str, Any]
+    outcome: bool
+    error: str
+    summary: str

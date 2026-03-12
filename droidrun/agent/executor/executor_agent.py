@@ -12,16 +12,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from llama_index.core.base.llms.types import ChatMessage, ImageBlock, TextBlock
 from llama_index.core.llms.llm import LLM
 from llama_index.core.workflow import Context, StartEvent, StopEvent, Workflow, step
 
+from droidrun.agent.action_result import ActionRecord
 from droidrun.agent.common.xml_parser import (
     CLOSE_TAG,
     OPEN_TAG,
-    ToolResult,
     parse_tool_calls,
 )
 from droidrun.agent.executor.events import (
@@ -66,7 +66,7 @@ class ExecutorAgent(Workflow):
         action_ctx: "ActionContext | None",
         shared_state: "DroidAgentState",
         agent_config: AgentConfig,
-        prompt_resolver: Optional[PromptResolver] = None,
+        prompt_resolver: PromptResolver | None = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -206,7 +206,7 @@ class ExecutorAgent(Workflow):
     @step
     async def process_response(
         self, ctx: Context, ev: ExecutorResponseEvent
-    ) -> ExecutorToolCallEvent | ExecutorContextEvent:
+    ) -> ExecutorToolCallEvent:
         """Parse LLM response and extract tool calls."""
         logger.debug("⚙️ Processing executor response...")
 
@@ -216,44 +216,16 @@ class ExecutorAgent(Workflow):
         thought, tool_calls = parse_tool_calls(response_text, self.param_types)
 
         if not tool_calls:
-            # No tool calls found — retry with error message (up to 3 times)
-            retry_count = await ctx.store.get("retry_count", 0)
-            if retry_count < 3:
-                await ctx.store.set("retry_count", retry_count + 1)
-                logger.warning(
-                    f"No tool calls in executor response (retry {retry_count + 1}/3)"
-                )
-
-                error_msg = (
-                    "No tool calls were found in your response. "
-                    "You must provide your action using the XML format:\n\n"
-                    "<function_calls>\n"
-                    '<invoke name="TOOL_NAME">\n'
-                    '<parameter name="PARAM">value</parameter>\n'
-                    "</invoke>\n"
-                    "</function_calls>"
-                )
-
-                messages = await ctx.store.get("executor_messages")
-                messages.append(ChatMessage(role="assistant", content=response_text))
-                messages.append(ChatMessage(role="user", content=error_msg))
-                await ctx.store.set("executor_messages", messages)
-
-                # Loop back to get_response
-                return ExecutorContextEvent(
-                    subgoal=await ctx.store.get("current_subgoal", "")
-                )
-
-            # Max retries reached — return empty result
-            logger.error("❌ Executor failed to produce tool calls after retries")
-            return ExecutorToolCallEvent(
+            # No tool calls — pass the executor's text through to the Manager
+            logger.debug("Executor returned text without tool calls")
+            self.shared_state.last_thought = thought
+            event = ExecutorToolCallEvent(
                 tool_calls_repr=None,
-                thought=thought or "Failed to produce valid tool calls",
+                thought=thought,
                 full_response=response_text,
             )
-
-        # Store tool calls for execute step
-        await ctx.store.set("pending_tool_calls", tool_calls)
+            ctx.write_event_to_stream(event)
+            return event
 
         # Cap at MAX_TOOL_CALLS
         if len(tool_calls) > MAX_TOOL_CALLS:
@@ -261,17 +233,18 @@ class ExecutorAgent(Workflow):
                 f"Executor produced {len(tool_calls)} tool calls, capping at {MAX_TOOL_CALLS}"
             )
             tool_calls = tool_calls[:MAX_TOOL_CALLS]
-            await ctx.store.set("pending_tool_calls", tool_calls)
 
-        # Extract tool calls XML for event
-        tool_calls_xml = None
-        if tool_calls:
-            blocks = []
-            for part in response_text.split(OPEN_TAG)[1:]:
-                close_idx = part.find(CLOSE_TAG)
-                if close_idx != -1:
-                    blocks.append(OPEN_TAG + part[: close_idx + len(CLOSE_TAG)])
-            tool_calls_xml = "\n".join(blocks) if blocks else None
+        await ctx.store.set("pending_tool_calls", tool_calls)
+
+        # Extract tool calls XML for event (only for capped calls)
+        blocks = []
+        for i, part in enumerate(response_text.split(OPEN_TAG)[1:]):
+            if i >= len(tool_calls):
+                break
+            close_idx = part.find(CLOSE_TAG)
+            if close_idx != -1:
+                blocks.append(OPEN_TAG + part[: close_idx + len(CLOSE_TAG)])
+        tool_calls_xml = "\n".join(blocks) if blocks else None
 
         # Update shared state
         self.shared_state.last_thought = thought
@@ -292,37 +265,28 @@ class ExecutorAgent(Workflow):
         tool_calls = await ctx.store.get("pending_tool_calls", [])
 
         if not tool_calls:
+            # No tool calls — executor returned text only, pass through
             event = ExecutorActionResultEvent(
-                actions=[{
-                    "action": "invalid",
-                    "args": {},
-                    "outcome": False,
-                    "error": "No valid tool calls to execute",
-                    "summary": "No valid tool calls to execute",
-                }],
+                actions=[],
                 thought=ev.thought,
                 full_response=ev.full_response,
             )
             ctx.write_event_to_stream(event)
             return event
 
-        actions = []
+        actions: list[ActionRecord] = []
         for call in tool_calls:
             logger.debug(f"Executing: {call.name}({call.parameters})")
 
             if call.error:
-                result = ToolResult(
-                    name=call.name,
-                    output=f"Invalid arguments for {call.name}: {call.error}",
-                    is_error=True,
-                )
-                actions.append({
-                    "action": call.name,
-                    "args": call.parameters,
-                    "outcome": False,
-                    "error": result.output,
-                    "summary": result.output,
-                })
+                error_msg = f"Invalid arguments for {call.name}: {call.error}"
+                actions.append(ActionRecord(
+                    action=call.name,
+                    args=call.parameters,
+                    outcome=False,
+                    error=error_msg,
+                    summary=error_msg,
+                ))
                 # Stop on error
                 break
 
@@ -330,13 +294,13 @@ class ExecutorAgent(Workflow):
                 call.name, call.parameters, self.action_ctx, workflow_ctx=ctx
             )
 
-            actions.append({
-                "action": call.name,
-                "args": call.parameters,
-                "outcome": action_result.success,
-                "error": "" if action_result.success else action_result.summary,
-                "summary": action_result.summary,
-            })
+            actions.append(ActionRecord(
+                action=call.name,
+                args=call.parameters,
+                outcome=action_result.success,
+                error="" if action_result.success else action_result.summary,
+                summary=action_result.summary,
+            ))
 
             if not action_result.success:
                 # Stop on failure
@@ -363,5 +327,6 @@ class ExecutorAgent(Workflow):
             result={
                 "actions": ev.actions,
                 "thought": ev.thought,
+                "full_response": ev.full_response,
             }
         )

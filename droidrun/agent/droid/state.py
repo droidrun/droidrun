@@ -76,8 +76,8 @@ class DroidAgentState(BaseModel):
     summary_history: List[str] = Field(default_factory=list)
     action_outcomes: List[bool] = Field(default_factory=list)
     error_descriptions: List[str] = Field(default_factory=list)
-    last_action: Dict = Field(default_factory=dict)
-    last_summary: str = ""
+    last_executor_full_response: str = ""
+    last_executor_action_count: int = 0  # Number of actions from last executor turn
 
     # ========================================================================
     # Memory

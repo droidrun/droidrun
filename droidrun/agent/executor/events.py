@@ -5,10 +5,11 @@ Internal events for streaming to frontend/logging.
 For DroidAgent coordination events, see droid/events.py
 """
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from llama_index.core.workflow import Event
 
+from droidrun.agent.action_result import ActionRecord
 from droidrun.agent.usage import UsageResult
 
 
@@ -36,6 +37,6 @@ class ExecutorToolCallEvent(Event):
 class ExecutorActionResultEvent(Event):
     """Action execution results (all tool calls from one LLM response)."""
 
-    actions: List[Dict[str, Any]]
+    actions: List[ActionRecord]
     thought: str = ""
     full_response: str = ""
