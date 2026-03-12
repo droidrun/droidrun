@@ -159,21 +159,11 @@ class ManagerAgent(Workflow):
             )
 
     async def _build_system_prompt(self, has_text_to_modify: bool) -> str:
-        """Build system prompt with all context."""
-        # Build error history if needed
-        error_history = None
-        if self.shared_state.error_flag_plan:
-            k = self.shared_state.err_to_manager_thresh
-            error_history = [
-                {"action": act, "summary": summ, "error": err_des}
-                for act, summ, err_des in zip(
-                    self.shared_state.action_history[-k:],
-                    self.shared_state.summary_history[-k:],
-                    self.shared_state.error_descriptions[-k:],
-                    strict=True,
-                )
-            ]
+        """Build system prompt with all context.
 
+        Note: error_history is injected ephemerally into the last user message
+        (in _build_messages_with_context) to avoid invalidating the KV cache.
+        """
         # Get available secrets
         available_secrets = []
         if self.action_ctx and self.action_ctx.credential_manager:
@@ -199,7 +189,7 @@ class ManagerAgent(Workflow):
             "device_date": self.shared_state.device_date,
             "app_card": self.shared_state.app_card,
             "important_notes": "",  # TODO: implement
-            "error_history": error_history,
+            "error_history": None,
             "text_manipulation_enabled": has_text_to_modify
             and self.agent_config.fast_agent.codeact,
             "custom_tools_descriptions": custom_tools_descriptions,
@@ -220,23 +210,45 @@ class ManagerAgent(Workflow):
             )
 
     def _build_user_message_content(self) -> str:
-        """Build user message content with last action context."""
+        """Build user message content with last executor turn context."""
         parts = []
 
         # Add last thought
         if self.shared_state.last_thought:
-            parts.append(f"<thought>\n{self.shared_state.last_thought}\n</thought>\n")
+            parts.append(f"<executor_thoughts>\n{self.shared_state.last_thought}\n</executor_thoughts>\n")
 
-        # Add last action
-        if self.shared_state.last_action:
-            action_str = json.dumps(self.shared_state.last_action)
-            parts.append(f"<last_action>\n{action_str}\n</last_action>\n")
-
-        # Add last action summary
-        if self.shared_state.last_summary:
-            parts.append(
-                f"<last_action_description>\n{self.shared_state.last_summary}\n</last_action_description>\n"
-            )
+        # Add all actions from last executor turn
+        n = self.shared_state.last_executor_action_count
+        if n > 0 and len(self.shared_state.action_history) >= n:
+            parts.append("<executed_actions>\n")
+            for act, summ, outcome, err in zip(
+                self.shared_state.action_history[-n:],
+                self.shared_state.summary_history[-n:],
+                self.shared_state.action_outcomes[-n:],
+                self.shared_state.error_descriptions[-n:],
+                strict=True,
+            ):
+                action_str = json.dumps(act)
+                if outcome:
+                    parts.append(f"Action: {action_str} | Result: {summ}\n")
+                else:
+                    parts.append(f"Action: {action_str} | Result: Failed | Error: {err}\n")
+            parts.append("</executed_actions>\n")
+        elif self.shared_state.step_number > 1:
+            # Executor ran but returned no tool calls
+            parts.append("<error>Executor returned no action</error>\n")
+            if self.shared_state.last_executor_full_response:
+                output = self.shared_state.last_executor_full_response
+                if len(output) > 4000:
+                    truncated = len(output) - 4000
+                    output = (
+                        f"{output[:2000]}\n"
+                        f"...truncated ({truncated} characters)...\n"
+                        f"{output[-2000:]}"
+                    )
+                parts.append(
+                    f"<full_executor_output>\n{output}\n</full_executor_output>\n"
+                )
 
         return "".join(parts)
 
@@ -287,6 +299,30 @@ class ManagerAgent(Workflow):
             # Add screenshot if vision enabled
             if screenshot and self.vision:
                 messages[last_user_idx].blocks.append(ImageBlock(image=screenshot))
+
+            # Add error history if stuck (ephemeral — not stored in history)
+            if self.shared_state.error_flag_plan:
+                k = self.shared_state.err_to_manager_thresh
+                if len(self.shared_state.action_history) >= k:
+                    error_lines = []
+                    for act, summ, err_des in zip(
+                        self.shared_state.action_history[-k:],
+                        self.shared_state.summary_history[-k:],
+                        self.shared_state.error_descriptions[-k:],
+                        strict=True,
+                    ):
+                        error_lines.append(
+                            f"- Attempt: Action: {act} | Description: {summ} | Outcome: Failed | Feedback: {err_des}"
+                        )
+                    error_block = (
+                        "\n<potentially_stuck>\n"
+                        "You have encountered several failed attempts. Here are some logs:\n"
+                        + "\n".join(error_lines)
+                        + "\n</potentially_stuck>\n"
+                    )
+                    messages[last_user_idx].blocks.append(
+                        TextBlock(text=error_block)
+                    )
 
             # Add script result if available
             if self.shared_state.last_scripter_message:

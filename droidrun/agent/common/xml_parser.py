@@ -171,8 +171,8 @@ def _coerce_param(
         except ValueError:
             try:
                 return float(value)
-            except ValueError:
-                raise ValueError(f"parameter '{name}' expected number, got '{value}'")
+            except ValueError as e:
+                raise ValueError(f"parameter '{name}' expected number, got '{value}'") from e
 
     if expected == "list":
         value = value.strip()
@@ -181,7 +181,7 @@ def _coerce_param(
             if isinstance(parsed, list):
                 return parsed
             return [parsed]  # Single element — wrap in list
-        except (json.JSONDecodeError, ValueError):
-            raise ValueError(f"parameter '{name}' expected list, got '{value}'")
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ValueError(f"parameter '{name}' expected list, got '{value}'") from e
 
     return value

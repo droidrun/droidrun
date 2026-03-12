@@ -31,8 +31,8 @@ from droidrun.agent.droid.events import (
     FinalizeEvent,
 )
 from droidrun.agent.executor.events import (
-    ExecutorActionEvent,
     ExecutorActionResultEvent,
+    ExecutorToolCallEvent,
 )
 from droidrun.agent.manager.events import (
     ManagerContextEvent,
@@ -97,11 +97,7 @@ class EventHandler:
                 )
 
         # ── Executor events (reasoning mode) ────────────────────────
-        elif isinstance(event, ExecutorActionEvent):
-            if event.description:
-                logger.debug(
-                    f"🎯 Action: {event.description}", extra={"color": "yellow"}
-                )
+        elif isinstance(event, ExecutorToolCallEvent):
             if event.thought:
                 preview = (
                     event.thought[:120] + "..."
@@ -111,13 +107,17 @@ class EventHandler:
                 logger.debug(f"💭 Reasoning: {preview}", extra={"color": "cyan"})
 
         elif isinstance(event, ExecutorActionResultEvent):
-            if event.success:
-                logger.debug(f"✅ {event.summary}", extra={"color": "green"})
-            else:
-                error_msg = event.error or "Unknown error"
-                logger.debug(
-                    f"❌ {event.summary} ({error_msg})", extra={"color": "red"}
-                )
+            for action_record in event.actions:
+                if action_record["outcome"]:
+                    logger.debug(
+                        f"✅ {action_record['summary']}", extra={"color": "green"}
+                    )
+                else:
+                    error_msg = action_record["error"] or "Unknown error"
+                    logger.debug(
+                        f"❌ {action_record['summary']} ({error_msg})",
+                        extra={"color": "red"},
+                    )
 
         elif isinstance(event, ExecutorResultEvent):
             logger.debug("Step complete", extra={"color": "magenta"})
