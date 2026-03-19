@@ -58,6 +58,7 @@ class PortalClient:
         self.tcp_base_url = None
         self.local_tcp_port = None
         self._connected = False
+        self._auth_token: Optional[str] = None
 
     async def connect(self) -> None:
         """
@@ -76,6 +77,40 @@ class PortalClient:
         if not self._connected:
             await self.connect()
 
+    async def _fetch_auth_token(self) -> None:
+        """
+        Fetch Bearer token from Portal via content provider.
+
+        Stores the token in self._auth_token for use in TCP requests.
+        Fails silently — older Portal APKs without the auth endpoint
+        continue to work without an Authorization header.
+        """
+        try:
+            output = await self.device.shell(
+                "content query --uri content://com.droidrun.portal/auth_token"
+            )
+            if "result=" not in output:
+                logger.debug(
+                    "No auth_token endpoint on this Portal version — proceeding without auth"
+                )
+                return
+            json_str = output.split("result=", 1)[1].strip()
+            data = json.loads(json_str)
+            token = data.get("result") if isinstance(data, dict) else None
+            if token:
+                self._auth_token = token
+                logger.debug("Auth token fetched from Portal")
+            else:
+                logger.debug("auth_token response present but empty — proceeding without auth")
+        except Exception as e:
+            logger.debug(f"Could not fetch auth token ({e}) — proceeding without auth")
+
+    def _auth_headers(self) -> Dict[str, str]:
+        """Return Authorization header dict if a token is available, else empty dict."""
+        if self._auth_token:
+            return {"Authorization": f"Bearer {self._auth_token}"}
+        return {}
+
     async def _try_enable_tcp(self) -> None:
         """
         Try to enable TCP communication. Fails silently and falls back to content provider.
@@ -83,8 +118,9 @@ class PortalClient:
         Strategy:
         1. Check if forward already exists → reuse
         2. If not, create new forward
-        3. Test connection with ping
-        4. Set tcp_available flag
+        3. Fetch auth token from Portal
+        4. Test connection with authenticated endpoint (/version)
+        5. Set tcp_available flag
         """
         try:
             # Step 1: Check for existing forward
@@ -106,19 +142,24 @@ class PortalClient:
 
             # Store local port
             self.local_tcp_port = local_port
-
-            # Step 3: Test connection
             self.tcp_base_url = f"http://localhost:{local_port}"
+
+            # Step 3: Fetch auth token before testing connection
+            await self._fetch_auth_token()
+
+            # Step 4: Test connection using authenticated endpoint
             if await self._test_connection():
                 self.tcp_available = True
                 logger.debug(f"✓ TCP mode enabled: {self.tcp_base_url}")
             else:
-                # Step 3b: Try enabling the HTTP server via content provider
-                logger.debug("TCP ping failed, trying to enable Portal HTTP server...")
+                # Step 4b: Try enabling the HTTP server via content provider
+                logger.debug("TCP auth probe failed, trying to enable Portal HTTP server...")
                 await self.device.shell(
                     "content insert --uri content://com.droidrun.portal/toggle_socket_server --bind enabled:b:true"
                 )
                 await asyncio.sleep(1)
+                # Re-fetch token in case server restart rotated it
+                await self._fetch_auth_token()
                 if await self._test_connection():
                     self.tcp_available = True
                     logger.debug(
@@ -163,10 +204,19 @@ class PortalClient:
         return None
 
     async def _test_connection(self) -> bool:
-        """Test if TCP connection to Portal is working."""
+        """
+        Test if TCP connection to Portal is working.
+
+        Uses /version (requires auth) instead of /ping (no auth required) so
+        that tcp_available=True confirms both reachability and auth are working.
+        """
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(f"{self.tcp_base_url}/ping", timeout=5)
+                response = await client.get(
+                    f"{self.tcp_base_url}/version",
+                    headers=self._auth_headers(),
+                    timeout=5,
+                )
                 return response.status_code == 200
         except Exception as e:
             logger.debug(f"TCP connection test failed: {e}")
@@ -247,7 +297,9 @@ class PortalClient:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    f"{self.tcp_base_url}/state_full", timeout=10
+                    f"{self.tcp_base_url}/state_full",
+                    headers=self._auth_headers(),
+                    timeout=10,
                 )
                 if response.status_code == 200:
                     data = response.json()
@@ -345,7 +397,7 @@ class PortalClient:
                 response = await client.post(
                     f"{self.tcp_base_url}/keyboard/input",
                     json=payload,
-                    headers={"Content-Type": "application/json"},
+                    headers={"Content-Type": "application/json", **self._auth_headers()},
                     timeout=10,
                 )
                 if response.status_code == 200:
@@ -401,7 +453,11 @@ class PortalClient:
                 url += "?hideOverlay=false"
 
             async with httpx.AsyncClient() as client:
-                response = await client.get(url, timeout=10.0)
+                response = await client.get(
+                    url,
+                    headers=self._auth_headers(),
+                    timeout=10.0,
+                )
                 if response.status_code == 200:
                     data = response.json()
                     # Check for 'result' first (new portal format), then 'data' (legacy)
@@ -517,7 +573,9 @@ class PortalClient:
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
-                        f"{self.tcp_base_url}/version", timeout=5.0
+                        f"{self.tcp_base_url}/version",
+                        headers=self._auth_headers(),
+                        timeout=5.0,
                     )
                     if response.status_code == 200:
                         data = response.json()
@@ -565,7 +623,9 @@ class PortalClient:
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
-                        f"{self.tcp_base_url}/ping", timeout=5.0
+                        f"{self.tcp_base_url}/ping",
+                        headers=self._auth_headers(),
+                        timeout=5.0,
                     )
                     if response.status_code == 200:
                         try:
