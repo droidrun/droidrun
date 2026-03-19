@@ -1,15 +1,41 @@
 """
 Portal Client - Unified communication layer for DroidRun Portal app.
 
-This module provides automatic TCP/Content Provider fallback for Portal communication.
+Design contract
+---------------
+The client is always in exactly one of three TCP states, managed exclusively
+through the three state-transition helpers (_set_state_ready, _set_state_cp_only,
+_set_state_degraded). Each helper owns its invariant: session lifetime, counter
+resets, and logging are all co-located with the state change.
+
+    TCP_READY   — persistent session alive, auth valid.  tcp_available == True.
+    CP_ONLY     — TCP never attempted or permanently failed.
+                  tcp_available == False, _session is None.
+    DEGRADED    — was TCP_READY; hit a 401 that survived a forced token refresh.
+                  tcp_available == False, _session is None.
+                  Re-probe attempted every REPROBE_INTERVAL transport calls.
+
+Concurrency model
+-----------------
+_session_lock serialises *session mutation only* — it is never held across
+slow I/O (ADB shell calls). This eliminates the reentrant-lock deadlock that
+would occur if _fetch_auth_token tried to re-acquire the lock while a caller
+already held it.
+
+Token TTL (TOKEN_TTL_SECONDS) is a *performance hint*, not a correctness
+guarantee. A cached token is still considered valid until the server rejects
+it with HTTP 401. The TTL merely reduces the frequency of proactive ADB
+shell calls.
 """
 
 import asyncio
 import base64
-import io
 import json
 import logging
 import re
+import time
+from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -17,51 +43,192 @@ from async_adbutils import AdbDevice
 
 logger = logging.getLogger("droidrun")
 
-PORTAL_REMOTE_PORT = 8080  # Port on device where Portal HTTP server runs
+PORTAL_REMOTE_PORT = 8080
+REPROBE_INTERVAL = 10
+TOKEN_TTL_SECONDS = 300
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Supporting types
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class _TcpState(Enum):
+    READY = auto()
+    CP_ONLY = auto()
+    DEGRADED = auto()
+
+
+@dataclass(frozen=True)
+class PortalTimeouts:
+    """
+    All timeouts in one place.
+
+    Pass a custom instance to override defaults:
+        PortalClient(device, timeouts=PortalTimeouts(request=20.0))
+    """
+
+    ping: float = 3.0
+    auth_test: float = 5.0
+    request: float = 10.0
+    screenshot: float = 15.0
+    adb_shell: float = 15.0
+
+
+@dataclass
+class TransportMetrics:
+    """
+    Per-session transport counters.
+
+    Exposed as client.metrics for agent benchmarking and debugging.
+    All increments happen at the call-site without a lock — CPython's
+    GIL makes integer increments atomic, and the values are statistical
+    counters rather than correctness-critical state.
+    """
+
+    tcp_requests: int = 0
+    tcp_successes: int = 0
+    fallback_count: int = 0
+    auth_refresh_count: int = 0
+    reprobe_attempts: int = 0
+    reprobe_successes: int = 0
+
+    def summary(self) -> Dict[str, Any]:
+        total = self.tcp_requests or 1
+        return {
+            "tcp_requests": self.tcp_requests,
+            "tcp_success_rate": round(self.tcp_successes / total, 3),
+            "fallback_count": self.fallback_count,
+            "auth_refresh_count": self.auth_refresh_count,
+            "reprobe_attempts": self.reprobe_attempts,
+            "reprobe_successes": self.reprobe_successes,
+        }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# PortalClient
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 class PortalClient:
     """
     Unified client for DroidRun Portal communication.
 
-    Automatically handles TCP vs Content Provider fallback with the following strategy:
-    - On init, checks for existing port forward and reuses it
-    - If no forward exists, creates new one
-    - Tests connection and sets tcp_available flag
-    - All methods auto-select TCP or content provider based on availability
-    - Port forwards persist until device disconnect (no explicit cleanup needed)
+    TCP mode: persistent httpx.AsyncClient, Bearer auth, ~3-5x lower latency.
+    Content provider fallback: works without port forwarding, higher latency.
 
-    Key features:
-    - Reuses existing port forwards (no cleanup needed)
-    - Automatic fallback to content provider if TCP fails
-    - Zero explicit resource management
-    - Graceful degradation
+    Usage::
 
-    Note: TCP mode is significantly faster but requires ADB port forwarding.
-    Content provider mode works without port forwarding but has higher latency.
+        client = PortalClient(device, prefer_tcp=True)
+        await client.connect()
+        state = await client.get_state()
+        print(client.metrics.summary())
+        await client.disconnect()
     """
 
-    def __init__(self, device: AdbDevice, prefer_tcp: bool = False):
-        """
-        Initialize Portal client.
-
-        Args:
-            device: ADB device instance
-            prefer_tcp: Whether to prefer TCP communication (will fallback to content provider if unavailable)
-
-        Note:
-            Call `await client.connect()` after initialization to establish connection.
-        """
+    def __init__(
+        self,
+        device: AdbDevice,
+        prefer_tcp: bool = False,
+        timeouts: Optional[PortalTimeouts] = None,
+    ):
         self.device = device
         self.prefer_tcp = prefer_tcp
-        self.tcp_available = False
-        self.tcp_base_url = None
-        self.local_tcp_port = None
-        self._connected = False
+        self.timeouts = timeouts or PortalTimeouts()
+        self.metrics = TransportMetrics()
+
+        # Internal state
+        self._tcp_state: _TcpState = _TcpState.CP_ONLY
+        self._connected: bool = False
+        self._session: Optional[httpx.AsyncClient] = None
+
+        # Auth — TTL is a fetch-frequency hint only; 401 always triggers refresh
+        self._auth_token: Optional[str] = None
+        self._token_fetched_at: float = 0.0
+
+        # Lock guards session object mutation only — never held across ADB I/O
+        self._session_lock = asyncio.Lock()
+
+        # DEGRADED re-probe counter (read outside lock, write inside lock)
+        self._degraded_call_count: int = 0
+
+        # Degradation log gate — reset when client recovers to READY
+        self._degradation_logged: bool = False
+
+        # TCP coordinates
+        self.tcp_base_url: Optional[str] = None
+        self.local_tcp_port: Optional[int] = None
+
+    # ── public derived property ────────────────────────────────────────────────
+
+    @property
+    def tcp_available(self) -> bool:
+        return self._tcp_state == _TcpState.READY
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # State-transition helpers  (Issue 1 fix)
+    # Every transition lives here. Nothing else mutates _tcp_state directly.
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def _set_state_ready(self) -> None:
+        """
+        Transition to TCP_READY.
+
+        Assumes the session has already been built by the caller.
+        Resets DEGRADED counters and clears the degradation log gate so
+        the next degradation event produces a fresh INFO log.
+        """
+        self._tcp_state = _TcpState.READY
+        self._degraded_call_count = 0
+        self._degradation_logged = False
+        logger.debug(f"TCP state -> READY ({self.tcp_base_url})")
+
+    async def _set_state_cp_only(self, reason: str) -> None:
+        """
+        Transition to CP_ONLY (permanent, no re-probe).
+
+        Closes the session and clears auth state. Logged at WARNING.
+        """
+        async with self._session_lock:
+            await self._close_session_unsafe()
+        self._auth_token = None
+        self._token_fetched_at = 0.0
+        self._tcp_state = _TcpState.CP_ONLY
+        logger.warning(f"TCP state -> CP_ONLY: {reason}")
+
+    async def _set_state_degraded(self, reason: str) -> None:
+        """
+        Transition to DEGRADED (re-probe eligible).
+
+        Closes the session but preserves auth token for re-probe attempt.
+        Emits an INFO log exactly once per degradation episode.
+        """
+        async with self._session_lock:
+            await self._close_session_unsafe()
+        self._tcp_state = _TcpState.DEGRADED
+        if not self._degradation_logged:
+            logger.info(
+                f"Portal TCP degraded ({reason}) -> content provider fallback. "
+                f"Re-probing every {REPROBE_INTERVAL} requests."
+            )
+            self._degradation_logged = True
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Connection lifecycle
+    # ──────────────────────────────────────────────────────────────────────────
 
     async def connect(self) -> None:
         """
-        Establish connection...
+        Prepare the client for use.
+
+        Transport negotiation (_try_enable_tcp) is a distinct sub-concern.
+        connect() is the *lifecycle* operation: it marks the client ready
+        for callers and enforces post-condition invariants regardless of
+        which transport was chosen.
+
+        Post-conditions:
+            TCP_READY  — prefer_tcp=True and all setup succeeded.
+            CP_ONLY    — prefer_tcp=False, or TCP setup failed entirely.
         """
         if self._connected:
             return
@@ -69,443 +236,585 @@ class PortalClient:
         if self.prefer_tcp:
             await self._try_enable_tcp()
 
+        # Enforce invariant: non-READY states must have no dangling session
+        if self._tcp_state != _TcpState.READY and self._session is not None:
+            async with self._session_lock:
+                await self._close_session_unsafe()
+
         self._connected = True
 
+    async def disconnect(self) -> None:
+        """Release resources. Safe to call multiple times."""
+        await self._set_state_cp_only("disconnect() called")
+        self._connected = False
+
     async def _ensure_connected(self) -> None:
-        """Check if connected, raise error if not."""
         if not self._connected:
             await self.connect()
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # TCP setup
+    # ──────────────────────────────────────────────────────────────────────────
+
     async def _try_enable_tcp(self) -> None:
         """
-        Try to enable TCP communication. Fails silently and falls back to content provider.
+        Attempt full TCP setup. On any failure stays CP_ONLY.
 
-        Strategy:
-        1. Check if forward already exists → reuse
-        2. If not, create new forward
-        3. Test connection with ping
-        4. Set tcp_available flag
+        Steps:
+        1. Find or create ADB port forward.
+        2. Build unauthenticated session; ping to confirm Portal is alive.
+        3. Optionally start Portal HTTP server if ping fails.
+        4. Fetch auth token; rebuild session with Authorization header.
+        5. Verify auth via /version (authenticated endpoint, not /ping).
+        6. Transition to READY.
         """
         try:
-            # Step 1: Check for existing forward
             local_port = await self._find_existing_forward()
-
-            # Step 2: If no forward exists, create one
             if local_port is None:
-                logger.debug(
-                    f"No existing forward found, creating new forward for port {PORTAL_REMOTE_PORT}"
-                )
+                logger.debug(f"Creating port forward for {PORTAL_REMOTE_PORT}")
                 local_port = await self.device.forward_port(PORTAL_REMOTE_PORT)
-                logger.debug(
-                    f"Created forward: localhost:{local_port} -> device:{PORTAL_REMOTE_PORT}"
-                )
             else:
-                logger.debug(
-                    f"Reusing existing forward: localhost:{local_port} -> device:{PORTAL_REMOTE_PORT}"
-                )
+                logger.debug(f"Reusing existing forward on localhost:{local_port}")
 
-            # Store local port
             self.local_tcp_port = local_port
-
-            # Step 3: Test connection
             self.tcp_base_url = f"http://localhost:{local_port}"
-            if await self._test_connection():
-                self.tcp_available = True
-                logger.debug(f"✓ TCP mode enabled: {self.tcp_base_url}")
-            else:
-                # Step 3b: Try enabling the HTTP server via content provider
-                logger.debug("TCP ping failed, trying to enable Portal HTTP server...")
+
+            # Build initial session (no token yet) for the unauthenticated ping
+            async with self._session_lock:
+                await self._rebuild_session_unsafe()
+
+            if not await self._ping_portal():
+                logger.debug("Ping failed, attempting to start Portal HTTP server...")
                 await self.device.shell(
-                    "content insert --uri content://com.droidrun.portal/toggle_socket_server --bind enabled:b:true"
+                    "content insert --uri content://com.droidrun.portal/toggle_socket_server"
+                    " --bind enabled:b:true"
                 )
                 await asyncio.sleep(1)
-                if await self._test_connection():
-                    self.tcp_available = True
-                    logger.debug(
-                        f"✓ TCP mode enabled after starting server: {self.tcp_base_url}"
+                if not await self._ping_portal():
+                    await self._set_state_cp_only(
+                        "Portal not reachable after server start"
                     )
-                else:
-                    logger.warning("TCP unavailable, using content provider fallback")
-                    self.tcp_available = False
+                    return
+
+            # Fetch token (pure ADB, no lock) then rebuild session with it
+            token = await self._request_token_from_device()
+            if token:
+                self._auth_token = token
+                self._token_fetched_at = time.monotonic()
+                async with self._session_lock:
+                    await self._rebuild_session_unsafe()
+
+            # Verify with authenticated endpoint
+            if await self._test_authenticated_connection():
+                await self._set_state_ready()
+            else:
+                await self._set_state_cp_only("Auth verification failed on /version")
 
         except Exception as e:
-            logger.warning(f"TCP unavailable ({e}), using content provider fallback")
-            self.tcp_available = False
+            await self._set_state_cp_only(f"TCP setup exception: {e}")
 
     async def _find_existing_forward(self) -> Optional[int]:
-        """
-        Check if a forward already exists for the Portal remote port.
-
-        Returns:
-            Local port number if forward exists, None otherwise
-        """
         try:
-            forwards = []
-            async for forward in self.device.forward_list():
-                forwards.append(forward)
-            # forwards is a list of ForwardItem objects with serial, local, remote attributes
-            for forward in forwards:
+            async for fwd in self.device.forward_list():
                 if (
-                    forward.serial == self.device.serial
-                    and forward.remote == f"tcp:{PORTAL_REMOTE_PORT}"
+                    fwd.serial == self.device.serial
+                    and fwd.remote == f"tcp:{PORTAL_REMOTE_PORT}"
                 ):
-                    # Extract local port from "tcp:12345"
-                    match = re.search(r"tcp:(\d+)", forward.local)
+                    match = re.search(r"tcp:(\d+)", fwd.local)
                     if match:
-                        local_port = int(match.group(1))
-                        logger.debug(
-                            f"Found existing forward: localhost:{local_port} -> {PORTAL_REMOTE_PORT}"
-                        )
-                        return local_port
+                        return int(match.group(1))
         except Exception as e:
-            logger.debug(f"Failed to check existing forwards: {e}")
-
+            logger.debug(f"Failed to list forwards: {e}")
         return None
 
-    async def _test_connection(self) -> bool:
-        """Test if TCP connection to Portal is working."""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{self.tcp_base_url}/ping", timeout=5)
-                return response.status_code == 200
-        except Exception as e:
-            logger.debug(f"TCP connection test failed: {e}")
-            return False
+    # ──────────────────────────────────────────────────────────────────────────
+    # Session management (lock-aware)
+    # ──────────────────────────────────────────────────────────────────────────
 
-    def _parse_content_provider_output(
-        self, raw_output: str
-    ) -> Optional[Dict[str, Any]]:
+    async def _rebuild_session_unsafe(self) -> None:
         """
-        Parse the raw ADB content provider output and extract JSON data.
+        Replace the persistent AsyncClient.
 
-        Args:
-            raw_output: Raw output from ADB content query command
+        MUST be called while holding _session_lock.
+        One AsyncClient per session lifetime — eliminates per-call TCP handshake
+        overhead across 20-100 agent loop requests.
+        """
+        await self._close_session_unsafe()
+        headers: Dict[str, str] = {}
+        if self._auth_token:
+            headers["Authorization"] = f"Bearer {self._auth_token}"
+        self._session = httpx.AsyncClient(
+            headers=headers,
+            timeout=self.timeouts.request,
+        )
+
+    async def _close_session_unsafe(self) -> None:
+        """Close _session. MUST hold _session_lock."""
+        if self._session is not None:
+            try:
+                await self._session.aclose()
+            except Exception:
+                pass
+            self._session = None
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Auth management  (Deadlock fix)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _token_is_fresh(self) -> bool:
+        """
+        Returns True if the cached token is younger than TOKEN_TTL_SECONDS.
+
+        This is a *performance hint* only — it reduces proactive ADB shell
+        calls. HTTP 401 always takes precedence as ground truth regardless
+        of this value.
+        """
+        return (
+            self._auth_token is not None
+            and (time.monotonic() - self._token_fetched_at) < TOKEN_TTL_SECONDS
+        )
+
+    async def _request_token_from_device(self) -> Optional[str]:
+        """
+        Fetch the raw Bearer token string via ADB content provider.
+
+        PURE I/O — no lock acquired, no session mutation. Designed to be
+        called *before* acquiring _session_lock so there is no reentrant
+        deadlock risk.
 
         Returns:
-            Parsed JSON data or None if parsing failed
+            Token string, or None if the Portal APK has no auth endpoint
+            or the fetch failed.
         """
-        lines = raw_output.strip().split("\n")
+        try:
+            output = await self.device.shell(
+                "content query --uri content://com.droidrun.portal/auth_token"
+            )
+            if "result=" not in output:
+                logger.debug("No auth_token endpoint on this Portal version")
+                return None
+            json_str = output.split("result=", 1)[1].strip()
+            data = json.loads(json_str)
+            token = data.get("result") if isinstance(data, dict) else None
+            if not token:
+                logger.debug("auth_token endpoint returned empty token")
+            return token or None
+        except Exception as e:
+            logger.debug(f"Token fetch failed: {e}")
+            return None
 
-        # Try line-by-line parsing
-        for line in lines:
+    async def _refresh_token_and_rebuild(self, force: bool = False) -> bool:
+        """
+        Fetch a fresh token (ADB, no lock) then rebuild the session (locked).
+
+        This is the sole path that combines a token fetch with a session rebuild.
+        Separating the I/O phase from the mutation phase is what prevents the
+        asyncio.Lock reentrant deadlock.
+
+        Args:
+            force: Skip TTL check and always fetch from device.
+
+        Returns:
+            True if a token is available (fresh cached or newly fetched)
+            and the session was rebuilt. False if no token could be obtained.
+        """
+        if not force and self._token_is_fresh():
+            logger.debug("Token fresh — skipping device refetch")
+            return True
+
+        token = await self._request_token_from_device()
+        if not token:
+            return False
+
+        self.metrics.auth_refresh_count += 1
+        self._auth_token = token
+        self._token_fetched_at = time.monotonic()
+
+        async with self._session_lock:
+            await self._rebuild_session_unsafe()
+
+        logger.debug("Auth token refreshed, session rebuilt")
+        return True
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Connection tests
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def _ping_portal(self) -> bool:
+        """Unauthenticated liveness probe. Used only during connect()."""
+        if not self._session:
+            return False
+        try:
+            r = await self._session.get(
+                f"{self.tcp_base_url}/ping", timeout=self.timeouts.ping
+            )
+            return r.status_code == 200
+        except Exception as e:
+            logger.debug(f"Portal ping failed: {e}")
+            return False
+
+    async def _test_authenticated_connection(self) -> bool:
+        """
+        Probe /version (requires auth) to confirm both reachability and auth.
+
+        /ping is unauthenticated — a 200 there only proves the port is open.
+        This call proves the token works, which is the real precondition for
+        setting tcp_available = True.
+        """
+        if not self._session:
+            return False
+        try:
+            r = await self._session.get(
+                f"{self.tcp_base_url}/version", timeout=self.timeouts.auth_test
+            )
+            if r.status_code == 200:
+                return True
+            logger.debug(f"Auth test returned HTTP {r.status_code}")
+            return False
+        except Exception as e:
+            logger.debug(f"Auth test failed: {e}")
+            return False
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # DEGRADED re-probe  (Issue 2 fix — fast path outside lock)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def _maybe_reprobe(self) -> None:
+        """
+        Attempt TCP recovery from DEGRADED state every REPROBE_INTERVAL calls.
+
+        Counter increment is outside the lock (statistical, not correctness-
+        critical). State mutation is inside the lock via the state helpers.
+        """
+        # Fast path — no lock needed for the read or the increment
+        self._degraded_call_count += 1
+        if self._degraded_call_count % REPROBE_INTERVAL != 0:
+            return
+
+        self.metrics.reprobe_attempts += 1
+        logger.debug(
+            f"DEGRADED re-probe #{self._degraded_call_count // REPROBE_INTERVAL}"
+        )
+
+        refreshed = await self._refresh_token_and_rebuild(force=True)
+        if not refreshed:
+            logger.debug("Re-probe: token fetch failed")
+            return
+
+        if await self._test_authenticated_connection():
+            self.metrics.reprobe_successes += 1
+            await self._set_state_ready()
+            logger.info("Portal TCP recovered from DEGRADED -> READY")
+        else:
+            logger.debug("Re-probe: auth test failed — staying DEGRADED")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Core transport helpers  (Issue 4 fix — DRY gating)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def _ensure_tcp_ready(self) -> bool:
+        """
+        Single gating check shared by _tcp_get and _tcp_post.
+
+        Handles DEGRADED re-probe before returning the verdict.
+
+        Returns:
+            True if TCP is READY and _session is not None.
+        """
+        if self._tcp_state == _TcpState.DEGRADED:
+            await self._maybe_reprobe()
+        return self._tcp_state == _TcpState.READY and self._session is not None
+
+    async def _tcp_get(self, path: str, **kwargs) -> Optional[httpx.Response]:
+        """
+        GET via persistent session with 401 self-healing.
+
+        Returns Response on success, None when TCP is unavailable/unrecoverable.
+        Callers always fall back to content provider on None.
+        """
+        if not await self._ensure_tcp_ready():
+            return None
+
+        self.metrics.tcp_requests += 1
+        url = f"{self.tcp_base_url}{path}"
+        try:
+            response = await self._session.get(url, **kwargs)
+            if response.status_code == 401:
+                return await self._handle_401_and_retry("GET", url, kwargs, is_get=True)
+            self.metrics.tcp_successes += 1
+            return response
+        except Exception as e:
+            logger.debug(f"TCP GET {path} error: {e}")
+            return None
+
+    async def _tcp_post(self, path: str, **kwargs) -> Optional[httpx.Response]:
+        """
+        POST via persistent session with 401 self-healing.
+
+        Same semantics as _tcp_get.
+        """
+        if not await self._ensure_tcp_ready():
+            return None
+
+        self.metrics.tcp_requests += 1
+        url = f"{self.tcp_base_url}{path}"
+        try:
+            response = await self._session.post(url, **kwargs)
+            if response.status_code == 401:
+                return await self._handle_401_and_retry(
+                    "POST", url, kwargs, is_get=False
+                )
+            self.metrics.tcp_successes += 1
+            return response
+        except Exception as e:
+            logger.debug(f"TCP POST {path} error: {e}")
+            return None
+
+    async def _handle_401_and_retry(
+        self,
+        method: str,
+        url: str,
+        kwargs: dict,
+        is_get: bool,
+    ) -> Optional[httpx.Response]:
+        """
+        401-recovery path shared by _tcp_get and _tcp_post.
+
+        Protocol (deadlock-free):
+        1. _request_token_from_device() — pure ADB I/O, NO lock held.
+        2. Acquire _session_lock, update token, rebuild session, release lock.
+        3. Retry once with the new session.
+        4. Second 401 -> DEGRADED.
+
+        The lock is never held during ADB I/O. This prevents the reentrant
+        deadlock that would occur if _fetch_auth_token (old design) tried to
+        re-acquire a lock already held by this method.
+        """
+        logger.debug(f"401 on {method} {url} — refreshing auth token")
+
+        # Phase 1: I/O (no lock)
+        token = await self._request_token_from_device()
+        if not token:
+            self.metrics.fallback_count += 1
+            await self._set_state_degraded(
+                f"{method} {url} — token refresh returned nothing"
+            )
+            return None
+
+        # Phase 2: Mutation (locked)
+        self.metrics.auth_refresh_count += 1
+        self._auth_token = token
+        self._token_fetched_at = time.monotonic()
+        async with self._session_lock:
+            await self._rebuild_session_unsafe()
+
+        if self._session is None:
+            return None
+
+        # Phase 3: Retry (lock released)
+        try:
+            response = (
+                await self._session.get(url, **kwargs)
+                if is_get
+                else await self._session.post(url, **kwargs)
+            )
+            if response.status_code != 401:
+                self.metrics.tcp_successes += 1
+                return response
+
+            self.metrics.fallback_count += 1
+            await self._set_state_degraded(
+                f"{method} {url} — refreshed token still rejected"
+            )
+            return None
+
+        except Exception as e:
+            logger.debug(f"Retry {method} {url} error: {e}")
+            return None
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Content provider helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _parse_content_provider_output(self, raw: str) -> Optional[Any]:
+        for line in raw.strip().split("\n"):
             line = line.strip()
-
-            # Look for "result=" pattern (common content provider format)
             if "result=" in line:
-                result_start = line.find("result=") + 7
-                json_str = line[result_start:]
+                json_str = line[line.find("result=") + 7 :]
                 try:
-                    json_data = json.loads(json_str)
-                    # Handle nested "result" or "data" field with JSON string (backward compatible)
-                    if isinstance(json_data, dict):
-                        # Check for 'result' first (new portal format), then 'data' (legacy)
+                    data = json.loads(json_str)
+                    if isinstance(data, dict):
                         inner_key = (
                             "result"
-                            if "result" in json_data
-                            else "data" if "data" in json_data else None
+                            if "result" in data
+                            else "data" if "data" in data else None
                         )
                         if inner_key:
-                            inner_value = json_data[inner_key]
-                            if isinstance(inner_value, str):
-                                try:
-                                    return json.loads(inner_value)
-                                except json.JSONDecodeError:
-                                    return inner_value
-                            return inner_value
-                    return json_data
+                            v = data[inner_key]
+                            try:
+                                return json.loads(v) if isinstance(v, str) else v
+                            except json.JSONDecodeError:
+                                return v
+                    return data
                 except json.JSONDecodeError:
                     continue
-
-            # Fallback: try lines starting with JSON
-            elif line.startswith("{") or line.startswith("["):
+            elif line.startswith(("{", "[")):
                 try:
                     return json.loads(line)
                 except json.JSONDecodeError:
                     continue
-
-        # Last resort: try parsing entire output
         try:
-            return json.loads(raw_output.strip())
+            return json.loads(raw.strip())
         except json.JSONDecodeError:
             return None
 
-    async def get_state(self) -> Dict[str, Any]:
-        """
-        Get device state (accessibility tree + phone state).
-        Auto-selects TCP or content provider.
+    @staticmethod
+    def _unwrap(data: Any) -> Any:
+        """Strip the Portal response envelope (result/data key)."""
+        if not isinstance(data, dict):
+            return data
+        key = "result" if "result" in data else "data" if "data" in data else None
+        if not key:
+            return data
+        v = data[key]
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return v
+        return v
 
-        Returns:
-            Dictionary containing 'a11y_tree' and 'phone_state' keys
-        """
+    # ──────────────────────────────────────────────────────────────────────────
+    # Public device API
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def get_state(self) -> Dict[str, Any]:
+        """Get device state (accessibility tree + phone state)."""
         await self._ensure_connected()
         if self.tcp_available:
             return await self._get_state_tcp()
         return await self._get_state_content_provider()
 
     async def _get_state_tcp(self) -> Dict[str, Any]:
-        """Get state via TCP."""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self.tcp_base_url}/state_full", timeout=10
-                )
-                if response.status_code == 200:
-                    data = response.json()
-
-                    # Handle nested "result" or "data" field (backward compatible)
-                    if isinstance(data, dict):
-                        # Check for 'result' first (new portal format), then 'data' (legacy)
-                        inner_key = (
-                            "result"
-                            if "result" in data
-                            else "data" if "data" in data else None
-                        )
-                        if inner_key:
-                            inner_value = data[inner_key]
-                            if isinstance(inner_value, str):
-                                try:
-                                    return json.loads(inner_value)
-                                except json.JSONDecodeError:
-                                    pass
-                            elif isinstance(inner_value, dict):
-                                return inner_value
-                    return data
-                else:
-                    logger.debug(
-                        f"TCP get_state failed ({response.status_code}), using fallback"
-                    )
-                    return await self._get_state_content_provider()
-        except Exception as e:
-            logger.debug(f"TCP get_state error: {e}, using fallback")
-            return await self._get_state_content_provider()
+        r = await self._tcp_get("/state_full", timeout=self.timeouts.request)
+        if r is not None and r.status_code == 200:
+            unwrapped = self._unwrap(r.json())
+            if isinstance(unwrapped, dict):
+                return unwrapped
+        self.metrics.fallback_count += 1
+        return await self._get_state_content_provider()
 
     async def _get_state_content_provider(self) -> Dict[str, Any]:
-        """Get state via content provider (fallback)."""
         try:
             output = await self.device.shell(
                 "content query --uri content://com.droidrun.portal/state_full"
             )
-            state_data = self._parse_content_provider_output(output)
-
-            if state_data is None:
+            data = self._parse_content_provider_output(output)
+            if data is None:
                 return {
                     "error": "Parse Error",
-                    "message": "Failed to parse state data from ContentProvider",
+                    "message": "Failed to parse state from ContentProvider",
                 }
-
-            # Handle nested "result" or "data" field if present (backward compatible)
-            if isinstance(state_data, dict):
-                # Check for 'result' first (new portal format), then 'data' (legacy)
-                inner_key = (
-                    "result"
-                    if "result" in state_data
-                    else "data" if "data" in state_data else None
-                )
-                if inner_key:
-                    inner_value = state_data[inner_key]
-                    if isinstance(inner_value, str):
-                        try:
-                            return json.loads(inner_value)
-                        except json.JSONDecodeError:
-                            return {
-                                "error": "Parse Error",
-                                "message": "Failed to parse nested JSON data",
-                            }
-                    elif isinstance(inner_value, dict):
-                        return inner_value
-
-            return state_data
-
+            unwrapped = self._unwrap(data) if isinstance(data, dict) else data
+            if isinstance(unwrapped, dict):
+                return unwrapped
+            return {"error": "Parse Error", "message": "Unexpected state format"}
         except Exception as e:
             return {"error": "ContentProvider Error", "message": str(e)}
 
     async def input_text(self, text: str, clear: bool = False) -> bool:
-        """
-        Input text via keyboard.
-        Auto-selects TCP or content provider.
-
-        Args:
-            text: Text to input
-            clear: Whether to clear existing text first
-
-        Returns:
-            True if successful, False otherwise
-        """
+        """Input text via keyboard."""
         await self._ensure_connected()
         if self.tcp_available:
             return await self._input_text_tcp(text, clear)
         return await self._input_text_content_provider(text, clear)
 
     async def _input_text_tcp(self, text: str, clear: bool) -> bool:
-        """Input text via TCP."""
-        try:
-            encoded = base64.b64encode(text.encode()).decode()
-            payload = {"base64_text": encoded, "clear": clear}
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.tcp_base_url}/keyboard/input",
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                    timeout=10,
-                )
-                if response.status_code == 200:
-                    logger.debug("TCP input_text successful")
-                    return True
-                else:
-                    logger.debug(
-                        f"TCP input_text failed ({response.status_code}), using fallback"
-                    )
-                    return await self._input_text_content_provider(text, clear)
-        except Exception as e:
-            logger.debug(f"TCP input_text error: {e}, using fallback")
-            return await self._input_text_content_provider(text, clear)
+        encoded = base64.b64encode(text.encode()).decode()
+        r = await self._tcp_post(
+            "/keyboard/input",
+            json={"base64_text": encoded, "clear": clear},
+            timeout=self.timeouts.request,
+        )
+        if r is not None and r.status_code == 200:
+            return True
+        self.metrics.fallback_count += 1
+        return await self._input_text_content_provider(text, clear)
 
     async def _input_text_content_provider(self, text: str, clear: bool) -> bool:
-        """Input text via content provider (fallback)."""
         try:
             encoded = base64.b64encode(text.encode()).decode()
-            clear_str = "true" if clear else "false"
             cmd = (
                 f'content insert --uri "content://com.droidrun.portal/keyboard/input" '
                 f'--bind base64_text:s:"{encoded}" '
-                f"--bind clear:b:{clear_str}"
+                f"--bind clear:b:{'true' if clear else 'false'}"
             )
             await self.device.shell(cmd)
-            logger.debug("Content provider input_text successful")
             return True
         except Exception as e:
             logger.error(f"Content provider input_text error: {e}")
             return False
 
     async def take_screenshot(self, hide_overlay: bool = True) -> bytes:
-        """
-        Take screenshot of device.
-        Auto-selects TCP or ADB screencap.
-
-        Args:
-            hide_overlay: Whether to hide Portal overlay during screenshot
-
-        Returns:
-            Screenshot image bytes (PNG format)
-        """
+        """Take screenshot of device."""
         await self._ensure_connected()
         if self.tcp_available:
             return await self._take_screenshot_tcp(hide_overlay)
         return await self._take_screenshot_adb()
 
     async def _take_screenshot_tcp(self, hide_overlay: bool) -> bytes:
-        """Take screenshot via TCP."""
-        try:
-            url = f"{self.tcp_base_url}/screenshot"
-            if not hide_overlay:
-                url += "?hideOverlay=false"
-
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, timeout=10.0)
-                if response.status_code == 200:
-                    data = response.json()
-                    # Check for 'result' first (new portal format), then 'data' (legacy)
-                    if data.get("status") == "success":
-                        inner_key = (
-                            "result"
-                            if "result" in data
-                            else "data" if "data" in data else None
-                        )
-                        if inner_key:
-                            logger.debug("Screenshot taken via TCP")
-                            return base64.b64decode(data[inner_key])
-                    logger.debug(
-                        "TCP screenshot failed (invalid response), using fallback"
-                    )
-                    return await self._take_screenshot_adb()
-                else:
-                    logger.debug(
-                        f"TCP screenshot failed ({response.status_code}), using fallback"
-                    )
-                    return await self._take_screenshot_adb()
-        except Exception as e:
-            logger.debug(f"TCP screenshot error: {e}, using fallback")
-            return await self._take_screenshot_adb()
+        path = "/screenshot" + ("" if hide_overlay else "?hideOverlay=false")
+        r = await self._tcp_get(path, timeout=self.timeouts.screenshot)
+        if r is not None and r.status_code == 200:
+            data = r.json()
+            if data.get("status") == "success":
+                key = (
+                    "result" if "result" in data else "data" if "data" in data else None
+                )
+                if key:
+                    return base64.b64decode(data[key])
+        self.metrics.fallback_count += 1
+        return await self._take_screenshot_adb()
 
     async def _take_screenshot_adb(self) -> bytes:
-        """Take screenshot via ADB screencap (fallback)."""
-        data = await self.device.screenshot_bytes()
-        logger.debug("Screenshot taken via ADB")
-        return data
+        return await self.device.screenshot_bytes()
 
     async def get_apps(self, include_system: bool = True) -> List[Dict[str, str]]:
-        """
-        Get installed apps with package name and label.
-
-        Note: Currently only supports content provider (no TCP endpoint exists yet)
-
-        Args:
-            include_system: Whether to include system apps
-
-        Returns:
-            List of dicts with 'package' and 'label' keys
-        """
+        """Get installed apps. Content provider only — no TCP endpoint exists yet."""
         await self._ensure_connected()
         try:
-            logger.debug("Getting apps via content provider")
-
-            # Query content provider
             output = await self.device.shell(
                 "content query --uri content://com.droidrun.portal/packages"
             )
-            packages_data = self._parse_content_provider_output(output)
-
-            if not packages_data:
-                logger.warning("No packages data found in content provider response")
+            data = self._parse_content_provider_output(output)
+            if not data:
+                logger.warning("No packages data from content provider")
                 return []
 
-            # Handle both formats:
-            # - New format: array directly (via RawArray -> result: [...])
-            # - Legacy format: wrapped in {"packages": [...]}
             packages_list = None
-            if isinstance(packages_data, list):
-                # New format: packages_data is already the list
-                packages_list = packages_data
-            elif isinstance(packages_data, dict):
-                if "packages" in packages_data:
-                    # Legacy format: wrapped in {"packages": [...]}
-                    packages_list = packages_data["packages"]
-                else:
-                    # May be wrapped in result/data
-                    inner_key = (
-                        "result"
-                        if "result" in packages_data
-                        else "data" if "data" in packages_data else None
+            if isinstance(data, list):
+                packages_list = data
+            elif isinstance(data, dict):
+                packages_list = data.get("packages")
+                if packages_list is None:
+                    inner = self._unwrap(data)
+                    packages_list = (
+                        inner
+                        if isinstance(inner, list)
+                        else (
+                            inner.get("packages") if isinstance(inner, dict) else None
+                        )
                     )
-                    if inner_key:
-                        inner_value = packages_data[inner_key]
-                        if isinstance(inner_value, list):
-                            packages_list = inner_value
-                        elif (
-                            isinstance(inner_value, dict) and "packages" in inner_value
-                        ):
-                            packages_list = inner_value["packages"]
 
             if not packages_list:
-                logger.warning("Could not extract packages list from response")
+                logger.warning("Could not extract packages list")
                 return []
 
-            # Filter and format apps
-            apps = []
-            for package_info in packages_list:
-                if not include_system and package_info.get("isSystemApp", False):
-                    continue
-
-                apps.append(
-                    {
-                        "package": package_info.get("packageName", ""),
-                        "label": package_info.get("label", ""),
-                    }
-                )
-
-            logger.debug(f"Found {len(apps)} apps")
-            return apps
-
+            return [
+                {"package": p.get("packageName", ""), "label": p.get("label", "")}
+                for p in packages_list
+                if include_system or not p.get("isSystemApp", False)
+            ]
         except Exception as e:
             logger.error(f"Error getting apps: {e}")
             raise ValueError(f"Error getting apps: {e}") from e
@@ -514,91 +823,64 @@ class PortalClient:
         """Get Portal app version."""
         await self._ensure_connected()
         if self.tcp_available:
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"{self.tcp_base_url}/version", timeout=5.0
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        # Check for 'result' first (new portal format), then 'data' (legacy)
-                        inner_key = (
-                            "result"
-                            if "result" in data
-                            else "data" if "data" in data else None
-                        )
-                        if inner_key:
-                            return data[inner_key]
-                        return data.get("status", "unknown")
-            except Exception:
-                pass
+            r = await self._tcp_get("/version", timeout=self.timeouts.auth_test)
+            if r is not None and r.status_code == 200:
+                v = self._unwrap(r.json())
+                if isinstance(v, str):
+                    return v
 
-        # Fallback to content provider
         try:
             output = await self.device.shell(
                 "content query --uri content://com.droidrun.portal/version"
             )
             result = self._parse_content_provider_output(output)
             if result:
-                # Check for 'result' first (new portal format), then 'data' (legacy)
-                inner_key = (
-                    "result"
-                    if "result" in result
-                    else "data" if "data" in result else None
-                )
-                if inner_key:
-                    return result[inner_key]
+                v = self._unwrap(result)
+                if isinstance(v, str):
+                    return v
         except Exception:
             pass
 
         return "unknown"
 
     async def ping(self) -> Dict[str, Any]:
-        """
-        Test Portal connection and verify state availability.
-
-        Returns:
-            Dictionary with status and connection details
-        """
+        """Test Portal connection and verify state availability."""
         await self._ensure_connected()
+        result: Dict[str, Any] = {}
+
         if self.tcp_available:
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"{self.tcp_base_url}/ping", timeout=5.0
-                    )
-                    if response.status_code == 200:
-                        try:
-                            tcp_response = response.json() if response.content else {}
-                            result = {
-                                "status": "success",
-                                "method": "tcp",
-                                "url": self.tcp_base_url,
-                                "response": tcp_response,
-                            }
-                        except json.JSONDecodeError:
-                            result = {
-                                "status": "success",
-                                "method": "tcp",
-                                "url": self.tcp_base_url,
-                                "response": response.text,
-                            }
-                    else:
-                        return {
-                            "status": "error",
-                            "method": "tcp",
-                            "message": f"HTTP {response.status_code}: {response.text}",
-                        }
-            except Exception as e:
-                return {"status": "error", "method": "tcp", "message": str(e)}
+            r = await self._tcp_get("/ping", timeout=self.timeouts.ping)
+            if r is not None and r.status_code == 200:
+                try:
+                    body = r.json() if r.content else {}
+                except json.JSONDecodeError:
+                    body = r.text
+                result = {
+                    "status": "success",
+                    "method": "tcp",
+                    "url": self.tcp_base_url,
+                    "tcp_state": self._tcp_state.name,
+                    "metrics": self.metrics.summary(),
+                    "response": body,
+                }
+            else:
+                return {
+                    "status": "error",
+                    "method": "tcp",
+                    "message": f"HTTP {r.status_code}" if r else "TCP request failed",
+                }
         else:
-            # Test content provider
             try:
                 output = await self.device.shell(
                     "content query --uri content://com.droidrun.portal/state"
                 )
                 if "Row: 0 result=" in output:
-                    result = {"status": "success", "method": "content_provider"}
+                    result = {
+                        "status": "success",
+                        "method": "content_provider",
+                        "tcp_state": self._tcp_state.name,
+                        "metrics": self.metrics.summary(),
+                    }
                 else:
                     return {
                         "status": "error",
@@ -612,21 +894,23 @@ class PortalClient:
                     "message": str(e),
                 }
 
-        # Verify state has the required keys
         try:
             state = await self.get_state()
-            required = ("a11y_tree", "phone_state", "device_context")
-            missing = [k for k in required if k not in state]
+            missing = [
+                k
+                for k in ("a11y_tree", "phone_state", "device_context")
+                if k not in state
+            ]
             if missing:
                 return {
                     "status": "error",
-                    "method": result.get("method", "unknown"),
+                    "method": result.get("method"),
                     "message": f"incompatible portal — missing {', '.join(missing)}",
                 }
         except Exception as e:
             return {
                 "status": "error",
-                "method": result.get("method", "unknown"),
+                "method": result.get("method"),
                 "message": f"state check failed: {e}",
             }
 
