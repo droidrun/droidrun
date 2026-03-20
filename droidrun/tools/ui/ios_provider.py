@@ -1,11 +1,10 @@
 """IOSStateProvider — builds UIState from iOS portal accessibility data.
 
 Parses the raw text-based accessibility tree returned by the iOS portal
-into structured elements compatible with UIState.
+into structured elements compatible with UIState. Screen dimensions and
+focused element are provided by the portal.
 
-Known limitations (pre-existing, documented as TODOs):
-- Screen dimensions inferred from element bounds with hardcoded fallback
-- ``focused_text`` always empty (iOS portal doesn't expose it)
+Known limitations:
 - Normalized coordinates untested on iOS
 - No filter/formatter pipeline (iOS a11y tree is raw text, not structured JSON)
 """
@@ -59,13 +58,19 @@ class IOSStateProvider(StateProvider):
         phone_state = raw.get("phone_state", {})
 
         elements = _parse_a11y_tree(a11y_text)
-        screen_width, screen_height = _infer_screen_size(elements)
+
+        # Screen size from portal
+        screen_size = raw.get("screen_size", {})
+        screen_width = int(screen_size["width"])
+        screen_height = int(screen_size["height"])
+
         formatted_text = _format_elements(elements, screen_width, screen_height)
+        focused_text = phone_state.get("focusedElement", "") or ""
 
         return UIState(
             elements=elements,
             formatted_text=formatted_text,
-            focused_text="",  # TODO: iOS doesn't expose focused element text
+            focused_text=focused_text,
             phone_state=phone_state,
             screen_width=screen_width,
             screen_height=screen_height,
@@ -145,34 +150,6 @@ def _parse_a11y_tree(a11y_text: str) -> List[Dict[str, Any]]:
         element_index += 1
 
     return elements
-
-
-# ---------------------------------------------------------------------------
-# Screen size inference
-# ---------------------------------------------------------------------------
-
-
-def _infer_screen_size(
-    elements: List[Dict[str, Any]],
-) -> Tuple[int, int]:
-    """Best-effort screen dimensions from element bounds.
-
-    Falls back to iPhone 14 dimensions if no elements are available.
-    """
-    max_right = 0
-    max_bottom = 0
-    for el in elements:
-        bounds = el.get("bounds", "")
-        if not bounds:
-            continue
-        parts = bounds.split(",")
-        if len(parts) == 4:
-            max_right = max(max_right, int(float(parts[2])))
-            max_bottom = max(max_bottom, int(float(parts[3])))
-    if max_right > 0 and max_bottom > 0:
-        return max_right, max_bottom
-    # TODO: hardcoded iPhone 14 fallback — no portal endpoint for screen size
-    return 390, 844
 
 
 # ---------------------------------------------------------------------------
