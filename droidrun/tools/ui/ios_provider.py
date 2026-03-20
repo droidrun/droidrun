@@ -65,7 +65,8 @@ class IOSStateProvider(StateProvider):
         screen_height = int(screen_size["height"])
 
         formatted_text = _format_elements(elements, screen_width, screen_height)
-        focused_text = phone_state.get("focusedElement", "") or ""
+        focused_element = phone_state.get("focusedElement") or {}
+        focused_text = focused_element.get("text", "") or ""
 
         return UIState(
             elements=elements,
