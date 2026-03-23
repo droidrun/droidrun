@@ -312,6 +312,9 @@ class CodeActAgent(Workflow):
                 activity_name=ui_state.phone_state.get("currentApp", "Unknown"),
             )
 
+            # Store ui_state so it's available during code execution
+            await ctx.store.set("ui_state", a11y_tree)
+
             # Stream formatted state for trajectory
             ctx.write_event_to_stream(RecordUIStateEvent(ui_state=ui_state.elements))
 
