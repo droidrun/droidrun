@@ -595,6 +595,18 @@ class ActionResult:
     requires_confirmation: bool = False
 
 
+
+# Allowed action types for the do() dispatch (matches ActionHandler registry)
+_ALLOWED_ACTIONS = frozenset({
+    "Launch", "Tap", "Type", "Type_Name", "Swipe", "Back", "Home",
+    "Double Tap", "Long Press", "Wait", "Take_over", "Note",
+    "Call_API", "Interact",
+})
+
+# Safe pattern for app/package names — rejects shell metacharacters
+_SAFE_APP_NAME_RE = re.compile(r"^[a-zA-Z0-9._\- ]+$")
+
+
 def parse_action(response: str) -> Dict[str, Any]:
     """
     Parse action from model response.
@@ -626,12 +638,34 @@ def parse_action(response: str) -> Dict[str, Any]:
                     raise ValueError("Expected a function call")
 
                 call = tree.body
+                # Verify the function name is exactly "do"
+                if not (isinstance(call.func, ast.Name) and call.func.id == "do"):
+                    raise ValueError(
+                        f"Expected do() call, got {ast.dump(call.func)}"
+                    )
+
                 # Extract keyword arguments safely
                 action: Dict[str, Any] = {"_metadata": "do"}
                 for keyword in call.keywords:
                     key = keyword.arg
                     value = ast.literal_eval(keyword.value)
                     action[key] = value
+
+
+                # Validate action type against allowlist
+                action_name = action.get("action")
+                if action_name and action_name not in _ALLOWED_ACTIONS:
+                    raise ValueError(
+                        f"Unknown action type: {action_name}"
+                    )
+
+                # Sanitize app name for Launch to prevent shell injection
+                if action_name == "Launch":
+                    app = action.get("app", "")
+                    if app and not _SAFE_APP_NAME_RE.match(app):
+                        raise ValueError(
+                            f"Invalid app name (contains unsafe characters): {app!r}"
+                        )
 
                 return action
             except (SyntaxError, ValueError) as e:
