@@ -184,7 +184,11 @@ class AndroidStateProvider(StateProvider):
                 new_token = await portal._fetch_auth_token()
                 if new_token:
                     portal._auth_token = new_token
-                    logger.debug("Auth token refreshed after TCP server restart")
+                    # Rebuild the persistent session so its default Authorization
+                    # header reflects the rotated token. Without this, the session
+                    # keeps sending the old (now-rejected) token on every request.
+                    await portal._replace_session()
+                    logger.debug("Auth token refreshed and session rebuilt after TCP server restart")
             except Exception as e:
                 logger.debug(f"TCP server restart failed: {e}")
 
