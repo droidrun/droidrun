@@ -76,8 +76,11 @@ class PortalClient:
         self.tcp_base_url = None
         self.local_tcp_port = None
         self._auth_token: Optional[str] = None
-        # Persistent session — None until TCP successfully connects.
-        # Invariant: _session is not None IFF tcp_available is True.
+        
+        # NOTE:
+        # DroidRun agent loop is sequential (no concurrent requests),
+        # so this shared AsyncClient is never accessed concurrently.
+        # This avoids thread-safety concerns while enabling connection reuse.
         self._session: Optional[httpx.AsyncClient] = None
         self._connected = False
 
@@ -357,30 +360,9 @@ class PortalClient:
     ) -> Optional[httpx.Response]:
         """
         Make an authenticated TCP request via the persistent session.
-
-        Single choke-point for all TCP HTTP traffic. Handles:
-        - Auth header injection
-        - 401/403 token refresh and session rebuild
-        - Connection-level failures → graceful CP downgrade
-
-        Args:
-            method: HTTP method string ("GET", "POST", ...).
-            url: Full URL to request.
-            extra_headers: Additional headers merged on top of auth headers.
-            **kwargs: Passed through to session.request().
-
-        Returns:
-            httpx.Response on success, or None if TCP is no longer available.
-            Callers must check for None and fall back to content provider.
         """
-        # Soft guard: if TCP has already been disabled (by a prior failure or
-        # explicit disconnect), return None so callers fall back to CP.
-        # We use a warning log rather than a hard crash because agent loops
-        # must stay resilient through transient state transitions.
         if not self.tcp_available or self._session is None:
-            logger.debug(
-                "_tcp_request called but TCP transport is not active — falling back"
-            )
+            logger.debug("_tcp_request: TCP inactive → fallback")
             return None
 
         headers = {**self._tcp_headers, **(extra_headers or {})}
@@ -388,33 +370,24 @@ class PortalClient:
         try:
             response = await self._session.request(method, url, headers=headers, **kwargs)
 
+            # 🔁 AUTH RECOVERY
             if response.status_code in (401, 403):
-                logger.debug(
-                    f"TCP auth rejected ({response.status_code}), re-fetching token..."
-                )
+                logger.debug("Auth expired → refreshing token")
                 new_token = await self._fetch_auth_token()
                 if new_token:
                     self._auth_token = new_token
-                    # Rebuild session so Authorization header is current
                     await self._replace_session()
                     headers = {**self._tcp_headers, **(extra_headers or {})}
-                    response = await self._session.request(
-                        method, url, headers=headers, **kwargs
-                    )
+                    response = await self._session.request(method, url, headers=headers, **kwargs)
 
             return response
 
         except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.NetworkError) as e:
-            # Connection-level failure: the device has gone away, ADB forward
-            # was torn down, or the Portal process died. Downgrade to CP so
-            # the agent can continue rather than crashing.
             await self._degrade_to_cp(str(e))
             return None
 
         except Exception as e:
-            # Unexpected error — log and return None for CP fallback.
-            # Do not degrade permanently on unknown errors (could be transient).
-            logger.debug(f"TCP request error ({method} {url}): {e}")
+            logger.debug(f"TCP request error: {e}")
             return None
 
     async def _test_connection(self) -> bool:
@@ -649,6 +622,7 @@ class PortalClient:
             url += "?hideOverlay=false"
 
         response = await self._tcp_request("GET", url, timeout=15.0)
+
         if response is not None and response.status_code == 200:
             data = response.json()
             if data.get("status") == "success":
@@ -658,10 +632,10 @@ class PortalClient:
                     else "data" if "data" in data else None
                 )
                 if inner_key:
-                    logger.debug("Screenshot taken via TCP")
+                    logger.debug("Screenshot via TCP")
                     return base64.b64decode(data[inner_key])
 
-        logger.debug("TCP screenshot failed, using ADB fallback")
+        logger.debug("TCP screenshot failed → ADB fallback")
         return await self._take_screenshot_adb()
 
     async def _take_screenshot_adb(self) -> bytes:
