@@ -167,7 +167,7 @@ def download_portal_apk(debug: bool = False):
         if (
             "browser_download_url" in asset
             and "name" in asset
-            and asset["name"].startswith(ASSET_NAME)
+        and (asset["name"].startswith(ASSET_NAME) or asset["name"].startswith(PORTAL_PACKAGE_NAME))
         ):
             asset_url = asset["browser_download_url"]
             asset_version = asset["name"].split("-")[-1]
