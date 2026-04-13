@@ -564,16 +564,6 @@ class OpenAIOAuth(OpenAI):
     ) -> OpenAIOAuthCredentials:
         _tls_preflight(self._oauth_manager.issuer)
 
-        if os.environ.get("DROIDRUN_OAUTH_FORCE_MANUAL"):
-            return self.login_manual(
-                open_browser=open_browser,
-                callback_host=callback_host,
-                callback_port=callback_port,
-                callback_path=callback_path,
-                redirect_host=redirect_host,
-                scope=scope,
-            )
-
         result: Dict[str, Optional[str]] = {"code": None, "state": None, "error": None}
         manual_code: Dict[str, Optional[str]] = {"code": None}
         done = threading.Event()

@@ -177,8 +177,13 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
         selected_model = custom_model
         if not selected_model:
             if model in self.MODEL_PRESETS:
+                # Passed a preset key like "pro_preview" → resolve to actual id.
                 selected_model = self.MODEL_PRESETS[model]
+            elif model and model != DEFAULT_MODEL:
+                # Explicit model name from config/CLI → honor it verbatim.
+                selected_model = model
             elif model_preset in self.MODEL_PRESETS:
+                # Fall back to preset only when no explicit model was provided.
                 selected_model = self.MODEL_PRESETS[model_preset]
             else:
                 selected_model = model
@@ -513,11 +518,6 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
         callback_path: str = "/oauth2callback",
         prompt_consent: bool = True,
     ) -> str:
-        if os.environ.get("DROIDRUN_OAUTH_FORCE_MANUAL"):
-            return self.login_manual(
-                open_browser=open_browser, prompt_consent=prompt_consent
-            )
-
         result: Dict[str, Optional[str]] = {"code": None, "state": None, "error": None}
         manual_code: Dict[str, Optional[str]] = {"code": None}
         done = threading.Event()

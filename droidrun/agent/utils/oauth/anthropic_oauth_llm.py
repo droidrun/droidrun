@@ -404,11 +404,6 @@ class AnthropicOAuthLLM(CustomLLM):
         callback_path: str = "/callback",
         expires_in: Optional[int] = None,
     ) -> str:
-        if os.environ.get("DROIDRUN_OAUTH_FORCE_MANUAL"):
-            return self.login_manual(
-                open_browser=open_browser, expires_in=expires_in
-            )
-
         result: Dict[str, Optional[str]] = {"code": None, "state": None, "error": None}
         manual_code: Dict[str, Optional[str]] = {"code": None}
         done = threading.Event()
