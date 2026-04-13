@@ -85,6 +85,9 @@ def _normalize_manual_code(raw: str, expected_state: str) -> str:
         parsed = urlparse(first_token)
         params = parse_qs(parsed.query)
         code = params.get("code", [None])[0]
+        state_from_url = params.get("state", [None])[0]
+        if state_from_url and state_from_url != expected_state:
+            raise RuntimeError("OAuth manual code state mismatch.")
         if isinstance(code, str) and code:
             return code
 
