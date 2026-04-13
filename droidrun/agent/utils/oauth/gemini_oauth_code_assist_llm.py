@@ -45,6 +45,9 @@ DEFAULT_CLIENT_ID = (
 )
 DEFAULT_CLIENT_SECRET = "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"
 
+# LlamaIndex-internal kwargs that must never be forwarded to Google's API.
+_IGNORED_REQUEST_KWARGS = {"formatted"}
+
 
 def _b64_no_pad(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
@@ -321,14 +324,26 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
             "pluginType": "GEMINI",
         }
 
+    def _build_headers(self, token: str) -> Dict[str, str]:
+        """Build Code Assist request headers matching gemini-cli expectations.
+
+        The private v1internal endpoint requires the X-Goog-Api-Client and
+        Client-Metadata headers to identify the caller as a gemini-cli-style
+        client; without them, requests return 400.
+        """
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+            "X-Goog-Api-Client": "gl-node/22.17.0",
+            "Client-Metadata": json.dumps(self._metadata_payload()),
+        }
+
     def _ensure_project_id(self, token: str) -> Optional[str]:
         if self.project_id:
             return self.project_id
 
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
+        headers = self._build_headers(token)
         metadata = self._metadata_payload()
         response = self._session.post(
             self._method_url(DEFAULT_CODE_ASSIST_LOAD_METHOD),
@@ -719,11 +734,18 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
         payload: Dict[str, Any] = {
             "model": self.model,
             "request": request,
+            "userAgent": "droidrun",
+            "requestId": f"droidrun-{int(time.time() * 1000)}-{secrets.token_hex(4)}",
         }
         if self.project_id:
             payload["project"] = self.project_id
 
-        payload.update(kwargs)
+        # Strip LlamaIndex-internal kwargs (e.g. ``formatted``) that Google's
+        # Code Assist API rejects as unknown fields.
+        safe_kwargs = {
+            k: v for k, v in kwargs.items() if k not in _IGNORED_REQUEST_KWARGS
+        }
+        payload.update(safe_kwargs)
         return payload
 
     def _method_url(self, method: str) -> str:
@@ -751,31 +773,76 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
 
     @llm_chat_callback()
     def chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+        # Google's Code Assist private API (v1internal) does not reliably
+        # accept the non-streaming generateContent endpoint for every model.
+        # Route chat through streamGenerateContent and accumulate the stream,
+        # matching the pattern used by gemini-cli / OpenClaw.
         token = self._resolve_access_token()
         self._ensure_project_id(token)
         payload = self._to_code_assist_request(messages, **kwargs)
 
         response = self._session.post(
-            self._method_url("generateContent"),
+            self._method_url("streamGenerateContent"),
+            params={"alt": "sse"},
             headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
+                **self._build_headers(token),
+                "Accept": "text/event-stream",
             },
             json=payload,
             timeout=self.timeout,
+            stream=True,
         )
-        response.raise_for_status()
+        if not response.ok:
+            raise requests.HTTPError(
+                f"Code Assist {response.status_code} error: {response.text}",
+                response=response,
+            )
 
-        raw = response.json()
-        text = self._extract_text(raw)
+        accumulated = ""
+        last_raw: Dict[str, Any] = {}
+        buffer: list[str] = []
+
+        def _flush(buffer: list[str]) -> Optional[Dict[str, Any]]:
+            if not buffer:
+                return None
+            chunk_text = "\n".join(buffer)
+            try:
+                return json.loads(chunk_text)
+            except json.JSONDecodeError:
+                return None
+
+        for line in response.iter_lines(decode_unicode=True):
+            if line is None:
+                continue
+            stripped = line.strip()
+            if stripped.startswith("data:"):
+                buffer.append(stripped[5:].strip())
+                continue
+            if stripped != "" or not buffer:
+                continue
+            raw_chunk = _flush(buffer)
+            buffer = []
+            if raw_chunk is None:
+                continue
+            last_raw = raw_chunk
+            delta = self._extract_text(raw_chunk)
+            if delta:
+                accumulated += delta
+
+        raw_chunk = _flush(buffer)
+        if raw_chunk is not None:
+            last_raw = raw_chunk
+            delta = self._extract_text(raw_chunk)
+            if delta:
+                accumulated += delta
 
         return ChatResponse(
-            message=ChatMessage(role=MessageRole.ASSISTANT, content=text),
-            raw=raw,
+            message=ChatMessage(role=MessageRole.ASSISTANT, content=accumulated),
+            raw=last_raw,
             additional_kwargs={
-                "trace_id": raw.get("traceId"),
-                "usage": (raw.get("response") or {}).get("usageMetadata"),
-                "model_version": (raw.get("response") or {}).get("modelVersion"),
+                "trace_id": last_raw.get("traceId"),
+                "usage": (last_raw.get("response") or {}).get("usageMetadata"),
+                "model_version": (last_raw.get("response") or {}).get("modelVersion"),
             },
         )
 
@@ -801,8 +868,8 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
             self._method_url("streamGenerateContent"),
             params={"alt": "sse"},
             headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
+                **self._build_headers(token),
+                "Accept": "text/event-stream",
             },
             json=payload,
             timeout=self.timeout,
