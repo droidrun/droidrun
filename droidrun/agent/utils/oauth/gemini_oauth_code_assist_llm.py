@@ -1,7 +1,10 @@
+import base64
+import hashlib
 import json
 import os
 import secrets
 import socket
+import sys
 import threading
 import time
 import webbrowser
@@ -41,6 +44,58 @@ DEFAULT_CLIENT_ID = (
     "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
 )
 DEFAULT_CLIENT_SECRET = "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"
+
+# LlamaIndex-internal kwargs that must never be forwarded to Google's API.
+_IGNORED_REQUEST_KWARGS = {"formatted"}
+
+
+def _b64_no_pad(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def _pkce_pair() -> tuple[str, str]:
+    verifier = _b64_no_pad(secrets.token_bytes(64))
+    challenge = _b64_no_pad(hashlib.sha256(verifier.encode("utf-8")).digest())
+    return verifier, challenge
+
+
+def _is_headless_environment() -> bool:
+    """Detect SSH, WSL, or missing display where browser popups won't work."""
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        return True
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    if sys.platform.startswith("linux"):
+        if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+            return True
+    return False
+
+
+def _normalize_manual_code(raw: str, expected_state: str) -> str:
+    """Parse pasted input: full URL with code= param, code#state, or bare code."""
+    value = raw.strip()
+    if not value:
+        return value
+
+    first_token = value.split()[0]
+
+    if "code=" in first_token:
+        parsed = urlparse(first_token)
+        params = parse_qs(parsed.query)
+        code = params.get("code", [None])[0]
+        state_from_url = params.get("state", [None])[0]
+        if state_from_url and state_from_url != expected_state:
+            raise RuntimeError("OAuth manual code state mismatch.")
+        if isinstance(code, str) and code:
+            return code
+
+    if "#" in first_token:
+        code_part, fragment = first_token.split("#", 1)
+        if fragment and fragment != expected_state:
+            raise RuntimeError("OAuth manual code state mismatch.")
+        return code_part
+
+    return first_token
 
 
 class GeminiOAuthCodeAssistLLM(CustomLLM):
@@ -125,8 +180,13 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
         selected_model = custom_model
         if not selected_model:
             if model in self.MODEL_PRESETS:
+                # Passed a preset key like "pro_preview" → resolve to actual id.
                 selected_model = self.MODEL_PRESETS[model]
+            elif model and model != DEFAULT_MODEL:
+                # Explicit model name from config/CLI → honor it verbatim.
+                selected_model = model
             elif model_preset in self.MODEL_PRESETS:
+                # Fall back to preset only when no explicit model was provided.
                 selected_model = self.MODEL_PRESETS[model_preset]
             else:
                 selected_model = model
@@ -272,14 +332,26 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
             "pluginType": "GEMINI",
         }
 
+    def _build_headers(self, token: str) -> Dict[str, str]:
+        """Build Code Assist request headers matching gemini-cli expectations.
+
+        The private v1internal endpoint requires the X-Goog-Api-Client and
+        Client-Metadata headers to identify the caller as a gemini-cli-style
+        client; without them, requests return 400.
+        """
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+            "X-Goog-Api-Client": "gl-node/22.17.0",
+            "Client-Metadata": json.dumps(self._metadata_payload()),
+        }
+
     def _ensure_project_id(self, token: str) -> Optional[str]:
         if self.project_id:
             return self.project_id
 
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
+        headers = self._build_headers(token)
         metadata = self._metadata_payload()
         response = self._session.post(
             self._method_url(DEFAULT_CODE_ASSIST_LOAD_METHOD),
@@ -359,16 +431,25 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
 
         return access_token
 
-    def _exchange_authorization_code(self, code: str, redirect_uri: str) -> str:
+    def _exchange_authorization_code(
+        self,
+        code: str,
+        redirect_uri: str,
+        code_verifier: Optional[str] = None,
+    ) -> str:
+        payload = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+        }
+        if code_verifier:
+            payload["code_verifier"] = code_verifier
+
         response = self._session.post(
             self.token_url,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-            },
+            data=payload,
             timeout=self.timeout,
         )
         response.raise_for_status()
@@ -384,6 +465,12 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
         if isinstance(refresh_token, str) and refresh_token:
             self._cached_refresh_token = refresh_token
 
+        if not self._cached_refresh_token:
+            raise RuntimeError(
+                "No refresh token received from Google. "
+                "Revoke access at https://myaccount.google.com/permissions and retry."
+            )
+
         expires_in = data.get("expires_in", 3600)
         try:
             expires_in_s = int(expires_in)
@@ -395,7 +482,13 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
         self._persist_credentials()
         return access_token
 
-    def _build_auth_url(self, redirect_uri: str, state: str, prompt_consent: bool) -> str:
+    def _build_auth_url(
+        self,
+        redirect_uri: str,
+        state: str,
+        prompt_consent: bool,
+        code_challenge: Optional[str] = None,
+    ) -> str:
         scope = " ".join(
             [
                 "https://www.googleapis.com/auth/cloud-platform",
@@ -413,6 +506,9 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
         }
         if prompt_consent:
             query["prompt"] = "consent"
+        if code_challenge:
+            query["code_challenge"] = code_challenge
+            query["code_challenge_method"] = "S256"
         return f"{self.authorize_url}?{urlencode(query)}"
 
     def login(
@@ -426,8 +522,10 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
         prompt_consent: bool = True,
     ) -> str:
         result: Dict[str, Optional[str]] = {"code": None, "state": None, "error": None}
+        manual_code: Dict[str, Optional[str]] = {"code": None}
         done = threading.Event()
         expected_state = secrets.token_hex(32)
+        code_verifier, code_challenge = _pkce_pair()
 
         class _OAuthHandler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802
@@ -459,38 +557,121 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
             def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
                 return
 
-        httpd = HTTPServer((callback_host, callback_port), _OAuthHandler)
+        try:
+            httpd = HTTPServer((callback_host, callback_port), _OAuthHandler)
+        except OSError as exc:
+            print(
+                f"Could not bind callback server on {callback_host}:{callback_port} ({exc}). "
+                "Falling back to manual code entry."
+            )
+            return self.login_manual(
+                open_browser=open_browser, prompt_consent=prompt_consent
+            )
+
         actual_port = httpd.server_address[1]
         redirect_uri = f"http://127.0.0.1:{actual_port}{callback_path}"
         auth_url = self._build_auth_url(
             redirect_uri=redirect_uri,
             state=expected_state,
             prompt_consent=prompt_consent,
+            code_challenge=code_challenge,
         )
 
         server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         server_thread.start()
 
         try:
+            print(f"Open this URL to login:\n{auth_url}\n")
             if open_browser:
                 webbrowser.open(auth_url)
-            else:
-                print(f"Open this URL to login:\n{auth_url}")
+
+            # Only run the manual-paste race when we can't rely on the local
+            # browser callback: headless envs (SSH/WSL/no-display), or when the
+            # user explicitly opts in with DROIDRUN_OAUTH_MANUAL=1. On a normal
+            # desktop the server always wins anyway, and a blocked input()
+            # thread would intercept InquirerPy's terminal queries and lag the
+            # configure wizard.
+            enable_manual = _is_headless_environment() or bool(
+                os.environ.get("DROIDRUN_OAUTH_MANUAL")
+            )
+            if enable_manual:
+                def _read_manual() -> None:
+                    try:
+                        raw = str(input("Or paste the redirect URL / authorization code: "))
+                    except Exception:
+                        return
+                    if done.is_set() or not raw.strip():
+                        return
+                    try:
+                        code = _normalize_manual_code(raw, expected_state)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"Invalid paste: {e}")
+                        return
+                    if code:
+                        manual_code["code"] = code
+                        done.set()
+
+                manual_thread = threading.Thread(target=_read_manual, daemon=True)
+                manual_thread.start()
 
             if not done.wait(timeout=timeout_seconds):
                 raise TimeoutError("OAuth login timed out before callback was received.")
 
-            if result["error"]:
-                raise RuntimeError(f"OAuth callback returned error: {result['error']}")
-            if result["state"] != expected_state:
-                raise RuntimeError("OAuth callback state mismatch.")
-            if not result["code"]:
-                raise RuntimeError("OAuth callback did not include an authorization code.")
+            if manual_code["code"]:
+                code_to_exchange = manual_code["code"]
+            else:
+                if result["error"]:
+                    raise RuntimeError(f"OAuth callback returned error: {result['error']}")
+                if result["state"] != expected_state:
+                    raise RuntimeError("OAuth callback state mismatch.")
+                if not result["code"]:
+                    raise RuntimeError("OAuth callback did not include an authorization code.")
+                code_to_exchange = result["code"]
 
-            return self._exchange_authorization_code(result["code"], redirect_uri)
+            return self._exchange_authorization_code(
+                code_to_exchange, redirect_uri, code_verifier=code_verifier
+            )
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+    def login_manual(
+        self,
+        *,
+        open_browser: bool = True,
+        input_fn: Any = input,
+        prompt_consent: bool = True,
+    ) -> str:
+        """Manual OAuth flow for headless/VPS/WSL environments.
+
+        Opens (or prints) the auth URL and prompts the user to paste the
+        redirected URL or bare authorization code from the browser.
+        """
+        code_verifier, code_challenge = _pkce_pair()
+        expected_state = secrets.token_hex(32)
+        # Google allows any loopback redirect for installed apps. The browser
+        # will fail to load the page, but the URL bar will contain the code.
+        redirect_uri = "http://localhost/oauth2callback"
+
+        auth_url = self._build_auth_url(
+            redirect_uri=redirect_uri,
+            state=expected_state,
+            prompt_consent=prompt_consent,
+            code_challenge=code_challenge,
+        )
+
+        print(f"Open this URL to login:\n{auth_url}")
+        if open_browser:
+            webbrowser.open(auth_url)
+
+        raw = str(input_fn("Paste the redirect URL or authorization code: "))
+        code = _normalize_manual_code(raw, expected_state)
+        if not code:
+            raise RuntimeError("Authorization code was empty.")
+
+        return self._exchange_authorization_code(
+            code, redirect_uri, code_verifier=code_verifier
+        )
 
     def _resolve_access_token(self) -> str:
         env_access_token = os.environ.get("GEMINI_OAUTH_ACCESS_TOKEN")
@@ -566,11 +747,18 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
         payload: Dict[str, Any] = {
             "model": self.model,
             "request": request,
+            "userAgent": "droidrun",
+            "requestId": f"droidrun-{int(time.time() * 1000)}-{secrets.token_hex(4)}",
         }
         if self.project_id:
             payload["project"] = self.project_id
 
-        payload.update(kwargs)
+        # Strip LlamaIndex-internal kwargs (e.g. ``formatted``) that Google's
+        # Code Assist API rejects as unknown fields.
+        safe_kwargs = {
+            k: v for k, v in kwargs.items() if k not in _IGNORED_REQUEST_KWARGS
+        }
+        payload.update(safe_kwargs)
         return payload
 
     def _method_url(self, method: str) -> str:
@@ -598,31 +786,76 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
 
     @llm_chat_callback()
     def chat(self, messages: Sequence[ChatMessage], **kwargs: Any) -> ChatResponse:
+        # Google's Code Assist private API (v1internal) does not reliably
+        # accept the non-streaming generateContent endpoint for every model.
+        # Route chat through streamGenerateContent and accumulate the stream,
+        # matching the pattern used by gemini-cli / OpenClaw.
         token = self._resolve_access_token()
         self._ensure_project_id(token)
         payload = self._to_code_assist_request(messages, **kwargs)
 
         response = self._session.post(
-            self._method_url("generateContent"),
+            self._method_url("streamGenerateContent"),
+            params={"alt": "sse"},
             headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
+                **self._build_headers(token),
+                "Accept": "text/event-stream",
             },
             json=payload,
             timeout=self.timeout,
+            stream=True,
         )
-        response.raise_for_status()
+        if not response.ok:
+            raise requests.HTTPError(
+                f"Code Assist {response.status_code} error: {response.text}",
+                response=response,
+            )
 
-        raw = response.json()
-        text = self._extract_text(raw)
+        accumulated = ""
+        last_raw: Dict[str, Any] = {}
+        buffer: list[str] = []
+
+        def _flush(buffer: list[str]) -> Optional[Dict[str, Any]]:
+            if not buffer:
+                return None
+            chunk_text = "\n".join(buffer)
+            try:
+                return json.loads(chunk_text)
+            except json.JSONDecodeError:
+                return None
+
+        for line in response.iter_lines(decode_unicode=True):
+            if line is None:
+                continue
+            stripped = line.strip()
+            if stripped.startswith("data:"):
+                buffer.append(stripped[5:].strip())
+                continue
+            if stripped != "" or not buffer:
+                continue
+            raw_chunk = _flush(buffer)
+            buffer = []
+            if raw_chunk is None:
+                continue
+            last_raw = raw_chunk
+            delta = self._extract_text(raw_chunk)
+            if delta:
+                accumulated += delta
+
+        raw_chunk = _flush(buffer)
+        if raw_chunk is not None:
+            last_raw = raw_chunk
+            delta = self._extract_text(raw_chunk)
+            if delta:
+                accumulated += delta
 
         return ChatResponse(
-            message=ChatMessage(role=MessageRole.ASSISTANT, content=text),
-            raw=raw,
+            message=ChatMessage(role=MessageRole.ASSISTANT, content=accumulated),
+            raw=last_raw,
             additional_kwargs={
-                "trace_id": raw.get("traceId"),
-                "usage": (raw.get("response") or {}).get("usageMetadata"),
-                "model_version": (raw.get("response") or {}).get("modelVersion"),
+                "trace_id": last_raw.get("traceId"),
+                "usage": (last_raw.get("response") or {}).get("usageMetadata"),
+                "model_version": (last_raw.get("response") or {}).get("modelVersion"),
             },
         )
 
@@ -648,8 +881,8 @@ class GeminiOAuthCodeAssistLLM(CustomLLM):
             self._method_url("streamGenerateContent"),
             params={"alt": "sse"},
             headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
+                **self._build_headers(token),
+                "Accept": "text/event-stream",
             },
             json=payload,
             timeout=self.timeout,

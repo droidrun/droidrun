@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import secrets
+import sys
 import threading
 import time
 import webbrowser
@@ -63,6 +64,18 @@ def _pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
+def _is_headless_environment() -> bool:
+    """Detect SSH, WSL, or missing display where browser popups won't work."""
+    if os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"):
+        return True
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    if sys.platform.startswith("linux"):
+        if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+            return True
+    return False
+
+
 def _normalize_manual_code(raw: str, expected_state: str) -> str:
     value = raw.strip()
     if not value:
@@ -74,6 +87,9 @@ def _normalize_manual_code(raw: str, expected_state: str) -> str:
         parsed = urlparse(first_token)
         params = parse_qs(parsed.query)
         code = params.get("code", [None])[0]
+        state_from_url = params.get("state", [None])[0]
+        if state_from_url and state_from_url != expected_state:
+            raise RuntimeError("OAuth manual code state mismatch.")
         if isinstance(code, str) and code:
             return code
 
@@ -392,6 +408,7 @@ class AnthropicOAuthLLM(CustomLLM):
         expires_in: Optional[int] = None,
     ) -> str:
         result: Dict[str, Optional[str]] = {"code": None, "state": None, "error": None}
+        manual_code: Dict[str, Optional[str]] = {"code": None}
         done = threading.Event()
 
         code_verifier, code_challenge = _pkce_pair()
@@ -431,7 +448,18 @@ class AnthropicOAuthLLM(CustomLLM):
             def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
                 return
 
-        httpd = HTTPServer((callback_host, callback_port), _OAuthHandler)
+        try:
+            httpd = HTTPServer((callback_host, callback_port), _OAuthHandler)
+        except OSError as exc:
+            self.authorize_url = original_authorize_url
+            print(
+                f"Could not bind callback server on {callback_host}:{callback_port} ({exc}). "
+                "Falling back to manual code entry."
+            )
+            return self.login_manual(
+                open_browser=open_browser, expires_in=expires_in
+            )
+
         actual_port = httpd.server_address[1]
         redirect_uri = f"http://localhost:{actual_port}{callback_path}"
         auth_url = self._build_auth_url(
@@ -442,23 +470,57 @@ class AnthropicOAuthLLM(CustomLLM):
 
         server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         server_thread.start()
+
         try:
+            print(f"Open this URL to login:\n{auth_url}\n")
             if open_browser:
                 webbrowser.open(auth_url)
-            else:
-                print(f"Open this URL to login:\n{auth_url}")
+
+            # Only run the manual-paste race when we can't rely on the local
+            # browser callback: headless envs (SSH/WSL/no-display), or when the
+            # user explicitly opts in with DROIDRUN_OAUTH_MANUAL=1. On a normal
+            # desktop the server always wins anyway, and a blocked input()
+            # thread would intercept InquirerPy's terminal queries and lag the
+            # configure wizard.
+            enable_manual = _is_headless_environment() or bool(
+                os.environ.get("DROIDRUN_OAUTH_MANUAL")
+            )
+            if enable_manual:
+                def _read_manual() -> None:
+                    try:
+                        raw = str(input("Or paste the redirect URL / authorization code: "))
+                    except Exception:
+                        return
+                    if done.is_set() or not raw.strip():
+                        return
+                    try:
+                        code = _normalize_manual_code(raw, state)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"Invalid paste: {e}")
+                        return
+                    if code:
+                        manual_code["code"] = code
+                        done.set()
+
+                manual_thread = threading.Thread(target=_read_manual, daemon=True)
+                manual_thread.start()
 
             if not done.wait(timeout=timeout_seconds):
                 raise TimeoutError("OAuth login timed out before callback was received.")
-            if result["error"]:
-                raise RuntimeError(f"OAuth callback returned error: {result['error']}")
-            if result["state"] != state:
-                raise RuntimeError("OAuth callback state mismatch.")
-            if not result["code"]:
-                raise RuntimeError("OAuth callback did not include an authorization code.")
+
+            if manual_code["code"]:
+                code_to_exchange = manual_code["code"]
+            else:
+                if result["error"]:
+                    raise RuntimeError(f"OAuth callback returned error: {result['error']}")
+                if result["state"] != state:
+                    raise RuntimeError("OAuth callback state mismatch.")
+                if not result["code"]:
+                    raise RuntimeError("OAuth callback did not include an authorization code.")
+                code_to_exchange = result["code"]
 
             return self._exchange_authorization_code(
-                code=result["code"],
+                code=code_to_exchange,
                 redirect_uri=redirect_uri,
                 code_verifier=code_verifier,
                 state=state,
@@ -491,11 +553,11 @@ class AnthropicOAuthLLM(CustomLLM):
         )
 
         try:
+            print(f"Open this URL to login:\n{auth_url}")
             if open_browser:
                 webbrowser.open(auth_url)
-            print(f"Open this URL to login:\n{auth_url}")
             code = _normalize_manual_code(
-                str(input_fn("Paste authorization code: ")),
+                str(input_fn("Paste the redirect URL or authorization code: ")),
                 state,
             )
             if not code:
