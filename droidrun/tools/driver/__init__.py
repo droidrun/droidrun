@@ -6,6 +6,7 @@ from droidrun.tools.driver.cloud import CloudDriver
 from droidrun.tools.driver.ios import IOSDriver
 from droidrun.tools.driver.recording import RecordingDriver
 from droidrun.tools.driver.stealth import StealthDriver
+from droidrun.tools.driver.vmos import VMOSDriver
 
 __all__ = [
     "DeviceDisconnectedError",
@@ -15,4 +16,5 @@ __all__ = [
     "IOSDriver",
     "RecordingDriver",
     "StealthDriver",
+    "VMOSDriver",
 ]

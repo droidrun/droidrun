@@ -395,6 +395,15 @@ class DroidAgent(Workflow):
                 ios_url = await discover_ios_portal()
             driver = IOSDriver(url=ios_url)
             await driver.connect()
+        elif self.resolved_device_config.platform.lower() == "vmos":
+            from droidrun.tools.driver.vmos import VMOSDriver
+
+            driver = VMOSDriver(
+                pad_code=self.resolved_device_config.serial,
+                access_key=os.environ.get("VMOS_AK", ""),
+                secret_key=os.environ.get("VMOS_SK", ""),
+            )
+            await driver.connect()
         else:
             device_serial = self.resolved_device_config.serial
             if device_serial is None:
